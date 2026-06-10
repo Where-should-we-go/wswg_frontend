@@ -4,6 +4,8 @@ import {
   clearAccessToken,
   getAccessToken,
   getCurrentUser,
+  isLoggedOut,
+  logoutLocalSession,
   refreshAccessToken,
   startOAuthLogin,
 } from '@/services/auth'
@@ -17,8 +19,19 @@ function login(provider) {
   startOAuthLogin(provider)
 }
 
+function logout() {
+  logoutLocalSession()
+  user.value = null
+  message.value = '로그인이 필요합니다.'
+}
+
 async function loadUser() {
   try {
+    if (isLoggedOut()) {
+      message.value = '로그인이 필요합니다.'
+      return
+    }
+
     if (!getAccessToken()) {
       await refreshAccessToken()
     }
@@ -67,6 +80,7 @@ onMounted(loadUser)
             <dd>{{ user.profileImageUrl || '아직 저장된 이미지가 없습니다.' }}</dd>
           </div>
         </dl>
+        <button v-if="user" class="logout-button" type="button" @click="logout">로그아웃</button>
         <div v-else class="empty-state">
           <p class="message">{{ message }}</p>
           <div v-if="message === '로그인이 필요합니다.'" class="login-actions">
@@ -233,7 +247,24 @@ dd {
     background 160ms ease;
 }
 
-.login-button:hover {
+.logout-button {
+  min-height: 44px;
+  margin-top: 24px;
+  padding: 0 18px;
+  border: 1px solid #c7dcff;
+  border-radius: 8px;
+  color: #1d4ed8;
+  background: #ffffff;
+  font-weight: 800;
+  cursor: pointer;
+  transition:
+    transform 160ms ease,
+    box-shadow 160ms ease,
+    background 160ms ease;
+}
+
+.login-button:hover,
+.logout-button:hover {
   transform: translateY(-1px);
 }
 

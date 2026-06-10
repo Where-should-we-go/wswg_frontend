@@ -4,6 +4,8 @@ import {
   clearAccessToken,
   getAccessToken,
   getCurrentUser,
+  isLoggedOut,
+  logoutLocalSession,
   refreshAccessToken,
   startOAuthLogin,
 } from '@/services/auth'
@@ -20,7 +22,7 @@ function login(provider) {
 }
 
 function logout() {
-  clearAccessToken()
+  logoutLocalSession()
   user.value = null
   hasSession.value = false
   message.value = '로그아웃되었습니다.'
@@ -31,6 +33,10 @@ async function loadUser() {
   message.value = ''
 
   try {
+    if (isLoggedOut()) {
+      return
+    }
+
     if (!getAccessToken()) {
       await refreshAccessToken()
     }

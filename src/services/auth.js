@@ -1,4 +1,5 @@
 const ACCESS_TOKEN_KEY = 'wswg.accessToken'
+const LOGGED_OUT_KEY = 'wswg.loggedOut'
 
 export function getAccessToken() {
   return localStorage.getItem(ACCESS_TOKEN_KEY)
@@ -7,6 +8,7 @@ export function getAccessToken() {
 export function setAccessToken(token) {
   if (token) {
     localStorage.setItem(ACCESS_TOKEN_KEY, token)
+    sessionStorage.removeItem(LOGGED_OUT_KEY)
   }
 }
 
@@ -14,7 +16,17 @@ export function clearAccessToken() {
   localStorage.removeItem(ACCESS_TOKEN_KEY)
 }
 
+export function logoutLocalSession() {
+  clearAccessToken()
+  sessionStorage.setItem(LOGGED_OUT_KEY, 'true')
+}
+
+export function isLoggedOut() {
+  return sessionStorage.getItem(LOGGED_OUT_KEY) === 'true'
+}
+
 export function startOAuthLogin(provider) {
+  sessionStorage.removeItem(LOGGED_OUT_KEY)
   window.location.assign(`/oauth2/authorization/${provider}`)
 }
 
