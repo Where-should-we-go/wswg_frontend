@@ -4,14 +4,16 @@ import {
   clearAccessToken,
   getAccessToken,
   getCurrentUser,
-  isLoggedOut,
-  logoutLocalSession,
   refreshAccessToken,
   startOAuthLogin,
 } from '@/services/auth'
+import { TripGenerateDialog } from '@/features/trip/components'
 
 const user = ref(null)
 const message = ref('사용자 정보를 불러오는 중입니다.')
+
+// 일정 자동 생성 모달 — "＋ 새 여행"에서 연다(목).
+const generateOpen = ref(false)
 
 const displayName = computed(() => user.value?.name || user.value?.email || '여행자')
 
@@ -19,19 +21,8 @@ function login(provider) {
   startOAuthLogin(provider)
 }
 
-function logout() {
-  logoutLocalSession()
-  user.value = null
-  message.value = '로그인이 필요합니다.'
-}
-
 async function loadUser() {
   try {
-    if (isLoggedOut()) {
-      message.value = '로그인이 필요합니다.'
-      return
-    }
-
     if (!getAccessToken()) {
       await refreshAccessToken()
     }
@@ -66,6 +57,9 @@ onMounted(loadUser)
       <div>
         <p>My Page</p>
         <h1>{{ displayName }}님</h1>
+        <button class="new-trip" type="button" @click="generateOpen = true">
+          ＋ 새 여행
+        </button>
         <dl v-if="user">
           <div>
             <dt>이메일</dt>
@@ -80,7 +74,6 @@ onMounted(loadUser)
             <dd>{{ user.profileImageUrl || '아직 저장된 이미지가 없습니다.' }}</dd>
           </div>
         </dl>
-        <button v-if="user" class="logout-button" type="button" @click="logout">로그아웃</button>
         <div v-else class="empty-state">
           <p class="message">{{ message }}</p>
           <div v-if="message === '로그인이 필요합니다.'" class="login-actions">
@@ -94,6 +87,8 @@ onMounted(loadUser)
         </div>
       </div>
     </section>
+
+    <TripGenerateDialog v-model:open="generateOpen" />
   </main>
 </template>
 
@@ -192,9 +187,26 @@ p {
 }
 
 h1 {
-  margin: 0 0 24px;
+  margin: 0 0 16px;
   font-size: clamp(1.8rem, 3vw, 2.8rem);
   letter-spacing: 0;
+}
+
+.new-trip {
+  margin: 0 0 24px;
+  padding: 9px 16px;
+  border: 0;
+  border-radius: 8px;
+  color: #ffffff;
+  background: #2563eb;
+  font-weight: 800;
+  cursor: pointer;
+  box-shadow: 0 12px 26px rgba(37, 99, 235, 0.22);
+  transition: transform 160ms ease;
+}
+
+.new-trip:hover {
+  transform: translateY(-1px);
 }
 
 dl {
@@ -247,24 +259,7 @@ dd {
     background 160ms ease;
 }
 
-.logout-button {
-  min-height: 44px;
-  margin-top: 24px;
-  padding: 0 18px;
-  border: 1px solid #c7dcff;
-  border-radius: 8px;
-  color: #1d4ed8;
-  background: #ffffff;
-  font-weight: 800;
-  cursor: pointer;
-  transition:
-    transform 160ms ease,
-    box-shadow 160ms ease,
-    background 160ms ease;
-}
-
-.login-button:hover,
-.logout-button:hover {
+.login-button:hover {
   transform: translateY(-1px);
 }
 

@@ -3,9 +3,14 @@
 // 워크스페이스 스위처 + nav(검색/홈/그룹 지도) + 페이지 트리 + 참여 중 + 새 여행.
 // 데이터(워크스페이스명/페이지 트리)는 props로 주입. 기본값은 목 데이터(시안 값).
 // TODO(backend): workspace/pages/joined 는 추후 워크스페이스·trips API 응답으로 대체.
+import { ref } from "vue";
 import { RouterLink } from "vue-router";
 import { Search, Home, Map, Plus, ChevronDown } from "@lucide/vue";
 import { NavItem } from "@/components/ui/nav-item";
+import { TripGenerateDialog } from "@/features/trip/components";
+
+// 일정 자동 생성 모달 — "＋ 새 여행"에서 연다(목).
+const generateOpen = ref(false);
 
 defineProps({
   // 워크스페이스: { name, mark } — mark 는 스위처 좌측 마크 글자.
@@ -61,9 +66,9 @@ defineProps({
     </button>
 
     <!-- nav -->
-    <NavItem :icon="Search" label="검색" />
-    <NavItem :icon="Home" label="홈" />
-    <NavItem :icon="Map" label="그룹 지도" />
+    <NavItem :as="RouterLink" to="/places" :icon="Search" label="검색" />
+    <NavItem :as="RouterLink" to="/" :icon="Home" label="홈" />
+    <NavItem :as="RouterLink" to="/map" :icon="Map" label="그룹 지도" />
 
     <!-- 내 여행 -->
     <div
@@ -104,7 +109,14 @@ defineProps({
       page
     />
 
-    <!-- 새 여행 -->
-    <NavItem :icon="Plus" label="새 여행" class="mt-2.5" />
+    <!-- 새 여행 → 일정 자동 생성 모달 -->
+    <NavItem
+      :icon="Plus"
+      label="새 여행"
+      class="mt-2.5"
+      @click="generateOpen = true"
+    />
+
+    <TripGenerateDialog v-model:open="generateOpen" />
   </aside>
 </template>
