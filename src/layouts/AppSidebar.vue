@@ -3,6 +3,7 @@
 // 워크스페이스 스위처 + nav(검색/홈/그룹 지도) + 페이지 트리 + 참여 중 + 새 여행.
 // 데이터(워크스페이스명/페이지 트리)는 props로 주입. 기본값은 목 데이터(시안 값).
 // TODO(backend): workspace/pages/joined 는 추후 워크스페이스·trips API 응답으로 대체.
+import { RouterLink } from "vue-router";
 import { Search, Home, Map, Plus, ChevronDown } from "@lucide/vue";
 import { NavItem } from "@/components/ui/nav-item";
 
@@ -21,6 +22,7 @@ defineProps({
         label: "부산 2박 3일",
         emoji: "🏖️",
         active: true,
+        to: "/trips/10",
         days: [
           { id: "d1", label: "1일차", emoji: "📅", active: true },
           { id: "d2", label: "2일차", emoji: "📅" },
@@ -70,7 +72,14 @@ defineProps({
       내 여행
     </div>
     <template v-for="page in pages" :key="page.id">
-      <NavItem :emoji="page.emoji" :label="page.label" page :active="page.active" />
+      <NavItem
+        :as="page.to ? RouterLink : 'div'"
+        :to="page.to"
+        :emoji="page.emoji"
+        :label="page.label"
+        page
+        :active="page.active"
+      />
       <NavItem
         v-for="day in page.days || []"
         :key="day.id"

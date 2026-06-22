@@ -3,6 +3,7 @@ import HomeView from '@/views/HomeView.vue'
 import LoginSuccessView from '@/views/LoginSuccessView.vue'
 import MyPageView from '@/views/MyPageView.vue'
 import TripsView from '@/views/TripsView.vue'
+import TripEditorView from '@/views/TripEditorView.vue'
 import AppShell from '@/layouts/AppShell.vue'
 
 const router = createRouter({
@@ -29,6 +30,12 @@ const router = createRouter({
           path: 'trips',
           name: 'trips',
           component: TripsView,
+        },
+        {
+          // 노션식 여행 계획 블록 에디터(Step 4)
+          path: 'trips/:id',
+          name: 'trip-editor',
+          component: TripEditorView,
         },
         {
           path: 'my',
