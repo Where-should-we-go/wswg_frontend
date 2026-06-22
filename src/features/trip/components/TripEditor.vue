@@ -7,6 +7,7 @@ import { computed } from "vue";
 import TripPropertyTable from "./TripPropertyTable.vue";
 import TripViewTabs from "./TripViewTabs.vue";
 import TripDayGroup from "./TripDayGroup.vue";
+import TripCalendar from "./TripCalendar.vue";
 
 const props = defineProps({
   // trips 레코드(.data.items 포함). mockTrip 형태.
@@ -59,8 +60,9 @@ const editorsByBlock = computed(() => {
 
     <div class="my-[18px] h-px bg-[var(--border)]" />
 
-    <!-- 뷰 탭 + 일정(일차 그룹들) -->
+    <!-- 뷰 탭: 일정(레일) / 캘린더(시간 그리드) — 같은 원본 items 공유(동기화). -->
     <TripViewTabs>
+      <!-- 일정 탭: 일차 그룹들 -->
       <TripDayGroup
         v-for="(d, i) in days"
         :key="d.date"
@@ -69,6 +71,11 @@ const editorsByBlock = computed(() => {
         :blocks="d.blocks"
         :editors="editorsByBlock"
       />
+
+      <!-- 캘린더 탭: 같은 trip.data.items 를 시간 그리드로 -->
+      <template #calendar>
+        <TripCalendar :items="trip.data.items" :start-date="trip.start_date" />
+      </template>
     </TripViewTabs>
   </article>
 </template>

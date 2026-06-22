@@ -5,9 +5,11 @@
 // ui/tabs(reka-ui) 위에 노션식 underline 스타일을 입혀 재사용한다.
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 
+// 일정·캘린더는 같은 원본(items[])을 두 슬롯으로 렌더 → 탭 토글로 전환(소스 공유).
+// 갤러리·지도는 아직 placeholder(soon).
 const TABS = [
   { value: "schedule", emoji: "📝", label: "일정" },
-  { value: "calendar", emoji: "📅", label: "캘린더", soon: "캘린더 뷰는 곧 만나요" },
+  { value: "calendar", emoji: "📅", label: "캘린더" },
   { value: "gallery", emoji: "🖼️", label: "갤러리", soon: "갤러리 뷰는 곧 만나요" },
   { value: "map", emoji: "🗺️", label: "지도", soon: "지도 뷰는 곧 만나요" },
 ];
@@ -29,9 +31,14 @@ const TABS = [
       </TabsTrigger>
     </TabsList>
 
-    <!-- 일정 뷰: 실제 구현(부모가 일차 그룹 주입) -->
+    <!-- 일정 뷰: 레일형(부모가 일차 그룹 주입) -->
     <TabsContent value="schedule" class="mt-1.5">
       <slot />
+    </TabsContent>
+
+    <!-- 캘린더 뷰: 시간 그리드(부모가 같은 items 로 TripCalendar 주입) -->
+    <TabsContent value="calendar" class="mt-1.5">
+      <slot name="calendar" />
     </TabsContent>
 
     <!-- 나머지 뷰: placeholder 빈 상태 -->
