@@ -11,3 +11,4 @@ export { default as TripCallout } from "./TripCallout.vue";
 export { default as TripSlashMenu } from "./TripSlashMenu.vue";
 export { default as AddBlockRow } from "./AddBlockRow.vue";
 export { default as TripGenerateDialog } from "./TripGenerateDialog.vue";
+export { default as TripCreateDialog } from "./TripCreateDialog.vue";
