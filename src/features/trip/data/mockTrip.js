@@ -5,12 +5,14 @@
 //   type       : 관광 | 식당 | 이동 | 메모 | 숙소  (한글 원문 — UI 매핑은 typeKey 헬퍼)
 //   lat / lng  : 좌표(장소 항목만, 이동·메모는 없을 수 있음)
 //   visitDate  : "YYYY-MM-DD" — 일차 그룹핑 키
-//   time       : "HH:mm" (선택)
-//   order      : 같은 날 내 정렬 순서
+//   time       : "HH:mm" | null — 없으면 "시간 미정" (비정형 허용)
+//   durationMin: number | null — 소요시간(분, 정본). 오버라인 라벨·캘린더 높이의 근거.
+//                ⚠ 문자열 duration:"1시간" 저장 금지 — durationMin 하나가 정본(스키마 §3).
+//   order      : 같은 날 내 정렬 순서(시간 없을 때의 기준)
 //   media[]    : { type: PHOTO|VIDEO, url, metadata{} }
-//   properties : 자유 필드(memo·budget·rating·예약번호·duration·checkIn·transport …)
+//   properties : 자유 필드(memo·budget·rating·예약번호·checkIn·transport …)
 //
-// 시안(artifact/design-flow.html §B) 내용과 정렬하되 스키마는 도메인 문서를 따른다.
+// 시안(artifact/schedule-final.html) 구조와 정렬하되 스키마는 도메인 문서를 따른다.
 // TODO(backend): 실제로는 GET /trips/:id 응답의 data(JSONB)로 대체.
 
 export const mockTrip = {
@@ -56,12 +58,13 @@ export const mockTrip = {
         lng: 129.16,
         visitDate: "2026-07-01",
         time: "10:00",
+        durationMin: 60, // ← 구 properties.duration "1시간" 이관
         order: 1,
         media: [
           { type: "PHOTO", url: "", metadata: { w: 4032, h: 3024 } },
           { type: "VIDEO", url: "", metadata: { durationSec: 15 } },
         ],
-        properties: { duration: "1시간", memo: "일출 명소", region: "부산 해운대구" },
+        properties: { memo: "일출 명소", region: "부산 해운대구" },
       },
       {
         id: "b-2",
@@ -72,6 +75,7 @@ export const mockTrip = {
         lng: 129.05,
         visitDate: "2026-07-01",
         time: "12:30",
+        durationMin: 60,
         order: 2,
         media: [],
         properties: { budget: 9000, rating: 5 },
@@ -85,9 +89,10 @@ export const mockTrip = {
         lng: 129.011,
         visitDate: "2026-07-01",
         time: "15:00",
+        durationMin: 120, // ← 구 properties.duration "2시간" 이관
         order: 3,
         media: [{ type: "PHOTO", url: "", metadata: { w: 4032, h: 3024 } }],
-        properties: { duration: "2시간", region: "부산 사하구" },
+        properties: { region: "부산 사하구", memo: "사진 명소" },
       },
       {
         id: "b-4",
@@ -98,6 +103,7 @@ export const mockTrip = {
         lng: 129.118,
         visitDate: "2026-07-01",
         time: "19:00",
+        durationMin: null, // 숙소(체크인) — 소요시간 개념 없음
         order: 4,
         media: [],
         properties: { budget: 120000, checkIn: "19:00", 예약번호: "HT-9921" },
@@ -111,6 +117,7 @@ export const mockTrip = {
         type: "이동",
         visitDate: "2026-07-02",
         time: "09:00",
+        durationMin: 15,
         order: 1,
         media: [],
         properties: { transport: "택시 15분" },
@@ -124,32 +131,52 @@ export const mockTrip = {
         lng: 129.118,
         visitDate: "2026-07-02",
         time: "10:00",
+        durationMin: 120, // ← 구 properties.duration "2시간" 이관
         order: 2,
         media: [],
-        properties: { budget: 40000, duration: "2시간" },
+        properties: { budget: 40000, region: "부산 수영구" },
       },
       {
         id: "b-7",
         content_id: null,
-        title: "체크인 전 짐 정리하고 야경 코스 동선 다시 보기",
+        title: "오후는 아직 미정",
         type: "메모",
         visitDate: "2026-07-02",
+        time: null, // 시간 미정 — 콜아웃으로 렌더
+        durationMin: null,
         order: 3,
         media: [],
-        properties: { memo: "준영이 카메라 챙기기" },
+        properties: {
+          memo: "F1963 / 영화의전당 중 한 곳 — 날씨 보고 정하기로 했어요.",
+        },
+      },
+      {
+        id: "b-8",
+        content_id: null,
+        title: "광안리 회센터",
+        type: "식당",
+        lat: 35.153,
+        lng: 129.118,
+        visitDate: "2026-07-02",
+        time: null, // 시간 미정 — 저녁 후보
+        durationMin: null,
+        order: 4,
+        media: [],
+        properties: { memo: "저녁 후보" },
       },
 
       // ── 3일차 ──
       {
-        id: "b-8",
+        id: "b-9",
         content_id: null,
         title: "KTX 부산역 → 서울역",
         type: "이동",
         visitDate: "2026-07-03",
         time: "15:00",
+        durationMin: 165, // KTX 2시간 45분
         order: 1,
         media: [],
-        properties: { transport: "KTX", 예약번호: "K-2026-0703" },
+        properties: { transport: "KTX 2시간 45분", 예약번호: "K-2026-0703" },
       },
     ],
   },

@@ -6,10 +6,10 @@
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 
 const TABS = [
-  { value: "schedule", emoji: "📅", label: "일정" },
+  { value: "schedule", emoji: "📝", label: "일정" },
+  { value: "calendar", emoji: "📅", label: "캘린더", soon: "캘린더 뷰는 곧 만나요" },
   { value: "gallery", emoji: "🖼️", label: "갤러리", soon: "갤러리 뷰는 곧 만나요" },
   { value: "map", emoji: "🗺️", label: "지도", soon: "지도 뷰는 곧 만나요" },
-  { value: "board", emoji: "📋", label: "보드", soon: "보드 뷰는 곧 만나요" },
 ];
 </script>
 
