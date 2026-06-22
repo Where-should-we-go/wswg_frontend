@@ -30,7 +30,7 @@ const previewBlocks = [
 </script>
 
 <template>
-  <main class="min-h-screen bg-[#F4F3F0] p-7 text-[var(--ink)]">
+  <main class="min-h-screen bg-[var(--sunken)] p-7 text-[var(--ink)]">
     <div
       class="relative mx-auto max-w-[1080px] overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--card)] shadow-[0_24px_60px_-16px_rgba(20,22,26,0.18)]"
     >
@@ -77,7 +77,7 @@ const previewBlocks = [
             class="mb-[7px] flex items-center gap-[7px] rounded-[7px] border bg-[var(--card)] px-2.5 py-[7px] text-[12px] shadow-[0_1px_2px_rgba(0,0,0,0.03)]"
             :class="
               block.editing
-                ? 'border-[#F0CBB6] bg-[#FCF3EE]'
+                ? 'border-[color-mix(in_srgb,var(--collab-2)_45%,transparent)] bg-[color-mix(in_srgb,var(--collab-2)_8%,transparent)]'
                 : 'border-[var(--border)]'
             "
           >
