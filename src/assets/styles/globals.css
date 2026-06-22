@@ -1,0 +1,202 @@
+@import "https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable.min.css";
+@import "tailwindcss";
+
+/*
+ * WSWG (어디갈래?) 디자인 시스템 토큰
+ * 단일 소스: docs/디자인시스템.md (§3 컬러, §4 타이포, §5 스페이싱/모양)
+ * shadcn-vue semantic 변수 + WSWG 커스텀 토큰.
+ */
+
+:root {
+  /* shadcn semantic — surface / ink */
+  --background: #ffffff;
+  --foreground: #37352f;
+  --card: #ffffff;
+  --card-foreground: #37352f;
+  --popover: #ffffff;
+  --popover-foreground: #37352f;
+
+  /* shadcn semantic — brand / state */
+  --primary: #2c6fe3;
+  --primary-foreground: #ffffff;
+  --secondary: #f1f1ef;
+  --secondary-foreground: #37352f;
+  --muted: #f7f6f3;
+  --muted-foreground: #6b6a65;
+  --accent: #f1f1ef;
+  --accent-foreground: #37352f;
+  --destructive: #c9453b;
+  --destructive-foreground: #ffffff;
+
+  /* shadcn semantic — chrome */
+  --border: #ededeb;
+  --input: #e3e2df;
+  --ring: #2c6fe3;
+  --radius: 0.5rem;
+
+  /* shadcn — sidebar */
+  --sidebar: #fbfbfa;
+  --sidebar-foreground: #37352f;
+  --sidebar-primary: #2c6fe3;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #f1f1ef;
+  --sidebar-accent-foreground: #37352f;
+  --sidebar-border: #ededeb;
+  --sidebar-ring: #2c6fe3;
+
+  /* WSWG — 보조 표면 (시안 sunken/hover) */
+  --sunken: #f7f6f3;
+  --hover: #f1f1ef;
+
+  /* WSWG — Ink 프리미티브 (§3.1) */
+  --ink: #37352f;
+  --ink-2: #6b6a65;
+  --ink-3: #9b9a95;
+
+  /* WSWG — 블록 타입 태그 (§3.3) */
+  --tag-blue-bg: #e3eef8;
+  --tag-blue-fg: #1f5c8f;
+  --tag-orange-bg: #fbeadb;
+  --tag-orange-fg: #9a5b17;
+  --tag-gray-bg: #ededeb;
+  --tag-gray-fg: #605f5a;
+  --tag-purple-bg: #eee7f6;
+  --tag-purple-fg: #6a4b97;
+  --tag-yellow-bg: #faf1d2;
+  --tag-yellow-fg: #86691a;
+  --tag-green-bg: #e5f0e4;
+  --tag-green-fg: #3f6b43;
+
+  /* WSWG — 협업 카렛 색 (§3.4, 라운드로빈) */
+  --collab-1: #2c6fe3;
+  --collab-2: #e0633d;
+  --collab-3: #3f9a6a;
+}
+
+/* 다크모드: 추후 토큰 오버라이드 (디자인시스템.md §3.6). 지금은 자리만 확보. */
+.dark {
+  --background: #ffffff;
+  --foreground: #37352f;
+  --sunken: #f7f6f3;
+  --hover: #f1f1ef;
+  --ink: #37352f;
+  --ink-2: #6b6a65;
+  --ink-3: #9b9a95;
+  --card: #ffffff;
+  --card-foreground: #37352f;
+  --popover: #ffffff;
+  --popover-foreground: #37352f;
+  --primary: #2c6fe3;
+  --primary-foreground: #ffffff;
+  --secondary: #f1f1ef;
+  --secondary-foreground: #37352f;
+  --muted: #f7f6f3;
+  --muted-foreground: #6b6a65;
+  --accent: #f1f1ef;
+  --accent-foreground: #37352f;
+  --destructive: #c9453b;
+  --destructive-foreground: #ffffff;
+  --border: #ededeb;
+  --input: #e3e2df;
+  --ring: #2c6fe3;
+  --sidebar: #fbfbfa;
+  --sidebar-foreground: #37352f;
+  --sidebar-primary: #2c6fe3;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #f1f1ef;
+  --sidebar-accent-foreground: #37352f;
+  --sidebar-border: #ededeb;
+  --sidebar-ring: #2c6fe3;
+}
+
+/* Tailwind v4 inline theme — semantic 변수를 유틸리티 토큰으로 매핑 */
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+
+  --color-sunken: var(--sunken);
+
+  --color-tag-blue-bg: var(--tag-blue-bg);
+  --color-tag-blue-fg: var(--tag-blue-fg);
+  --color-tag-orange-bg: var(--tag-orange-bg);
+  --color-tag-orange-fg: var(--tag-orange-fg);
+  --color-tag-gray-bg: var(--tag-gray-bg);
+  --color-tag-gray-fg: var(--tag-gray-fg);
+  --color-tag-purple-bg: var(--tag-purple-bg);
+  --color-tag-purple-fg: var(--tag-purple-fg);
+  --color-tag-yellow-bg: var(--tag-yellow-bg);
+  --color-tag-yellow-fg: var(--tag-yellow-fg);
+  --color-tag-green-bg: var(--tag-green-bg);
+  --color-tag-green-fg: var(--tag-green-fg);
+
+  --color-collab-1: var(--collab-1);
+  --color-collab-2: var(--collab-2);
+  --color-collab-3: var(--collab-3);
+
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+
+  --font-sans: "Pretendard Variable", Pretendard, -apple-system, "Apple SD Gothic Neo",
+    ui-sans-serif, system-ui, sans-serif;
+}
+
+@layer base {
+  *,
+  *::before,
+  *::after {
+    box-sizing: border-box;
+    border-color: var(--border);
+  }
+
+  html {
+    min-width: 320px;
+  }
+
+  body {
+    min-width: 320px;
+    min-height: 100vh;
+    margin: 0;
+    background-color: var(--background);
+    color: var(--foreground);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  button,
+  input {
+    font: inherit;
+  }
+
+  #app {
+    min-height: 100vh;
+  }
+}
