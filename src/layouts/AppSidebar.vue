@@ -1,20 +1,15 @@
 <script setup>
 // 앱 셸 좌측 사이드바(228px). 디자인시스템 §6.1.
-// 워크스페이스(모임) + nav(검색/홈/모임) + 내 여행/참여 중 트리 + 새 여행/그룹.
+// 워크스페이스(모임) + nav(검색/홈/모임) + 내 여행/참여 중 트리 + 새 여행/모임.
 // 데이터는 서비스 레이어(mock↔실제 자동 전환)에서 로드 — 화면 본문과 정합.
-import { onMounted, ref } from 'vue'
+import { onMounted, ref, watch } from 'vue'
 import { RouterLink, useRoute } from 'vue-router'
 import { Search, Home, Users, Plus } from '@lucide/vue'
 import { NavItem } from '@/components/ui/nav-item'
-import { TripCreateDialog } from '@/features/trip/components'
-import GroupCreateDialog from '@/features/group/components/GroupCreateDialog.vue'
 import { getGroups } from '@/services/groups'
 import { getMyTrips } from '@/services/mypage'
 
 const route = useRoute()
-
-const createTripOpen = ref(false)
-const createGroupOpen = ref(false)
 
 // 워크스페이스(모임) — 첫 모임을 대표로 표시. 드롭다운 없음(클릭 시 모임 관리로).
 const workspace = ref(null)
@@ -33,6 +28,8 @@ async function loadSidebar() {
 }
 
 onMounted(loadSidebar)
+// 다른 화면에서 여행/모임을 만들고 돌아오면 트리도 최신으로(가벼운 갱신).
+watch(() => route.name, loadSidebar)
 
 // 현재 보고 있는 여행인지(활성 표시).
 function isActiveTrip(tripId) {
@@ -99,13 +96,16 @@ function isActiveTrip(tripId) {
       참여 중인 여행이 없어요
     </p>
 
-    <!-- 새 여행 → 여행 생성(수동) 모달 -->
-    <NavItem :icon="Plus" label="새 여행" class="mt-2.5" @click="createTripOpen = true" />
+    <!-- 새 여행 만들기 → 자동 생성(S5). 마이페이지 버튼과 동일 동작 -->
+    <NavItem
+      :as="RouterLink"
+      to="/plans/new"
+      :icon="Plus"
+      label="새 여행 만들기"
+      class="mt-2.5"
+    />
 
-    <!-- 새 그룹 → 그룹 생성 모달 -->
-    <NavItem :icon="Plus" label="새 그룹" class="mt-0.5" @click="createGroupOpen = true" />
-
-    <TripCreateDialog v-model:open="createTripOpen" @created="loadSidebar" />
-    <GroupCreateDialog v-model:open="createGroupOpen" @created="loadSidebar" />
+    <!-- 새 모임 → 모임 관리(S9)에서 생성 -->
+    <NavItem :as="RouterLink" to="/groups" :icon="Plus" label="새 모임" class="mt-0.5" />
   </aside>
 </template>
