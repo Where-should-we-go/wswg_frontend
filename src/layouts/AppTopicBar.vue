@@ -1,49 +1,29 @@
 <script setup>
-// 앱 셸 상단 토픽바. 시안 §B `.topbar` 1:1 재현.
-// 브레드크럼 + 실시간 동기화(LiveIndicator) + 동행인 아바타 스택(AvatarStack) + 공유 버튼.
-// 데이터는 props로 주입. 기본값은 목 데이터(시안 값).
-// TODO(backend): crumb(워크스페이스/현재 trip 제목), members(실시간 참여자),
-//   live 라벨("N명 편집 중")은 추후 trips API + 협업(Redis) 상태로 대체.
-import { Button } from "@/components/ui/button";
-import { LiveIndicator } from "@/components/ui/live-indicator";
-import { AvatarStack } from "@/components/ui/avatar-stack";
+// 앱 셸 상단 토픽바. 현재 라우트 기반 브레드크럼만 표시(셸 공통).
+// 실시간 동기화·동행인 아바타·공유 등 협업 표시는 여행 편집(S6) 화면이
+// 자체 헤더에서 그린다 — 셸 토픽바는 어느 화면에서나 맞는 정보만 둔다.
+import { computed } from 'vue'
+import { useRoute } from 'vue-router'
 
-defineProps({
-  // 브레드크럼: { workspace, title } — title 만 강조.
-  crumb: {
-    type: Object,
-    default: () => ({ workspace: "부산크루", title: "부산 2박 3일" }),
-  },
-  liveLabel: { type: String, default: "실시간 동기화" },
-  // 동행인: AvatarStack members 형식.
-  members: {
-    type: Array,
-    default: () => [
-      { name: "태호", initial: "태" },
-      { name: "민지", initial: "민" },
-      { name: "준", initial: "준" },
-    ],
-  },
-});
+const route = useRoute()
 
-defineEmits(["share"]);
+// 라우트별 브레드크럼 라벨(디자인시스템 §6.1).
+const LABELS = {
+  mypage: '내 여행',
+  groups: '모임',
+  'group-map': '발자취 지도',
+  'plan-new': '여행 자동 생성',
+  'trip-editor': '여행 편집',
+  'admin-attractions': '관광지 관리',
+}
+
+const crumb = computed(() => LABELS[route.name] ?? '')
 </script>
 
 <template>
-  <header
-    class="flex h-11 items-center gap-2.5 border-b border-[var(--border)] px-[18px]"
-  >
+  <header class="flex h-11 items-center gap-2.5 border-b border-[var(--border)] px-[18px]">
     <div class="text-[13px] text-[var(--ink-2)]">
-      {{ crumb.workspace }} /
-      <b class="font-semibold text-[var(--ink)]">{{ crumb.title }}</b>
-    </div>
-
-    <div class="ml-auto flex items-center gap-3">
-      <LiveIndicator :label="liveLabel" />
-      <AvatarStack :members="members" />
-      <Button size="sm" class="h-auto px-[13px] py-1.5 text-[12.5px]" @click="$emit('share')"
-        >공유</Button
-      >
+      <b class="font-semibold text-[var(--ink)]">{{ crumb }}</b>
     </div>
   </header>
 </template>
