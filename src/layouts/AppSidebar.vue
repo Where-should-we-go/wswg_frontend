@@ -105,7 +105,13 @@ function isActiveTrip(tripId) {
       class="mt-2.5"
     />
 
-    <!-- 새 모임 → 모임 관리(S9)에서 생성 -->
-    <NavItem :as="RouterLink" to="/groups" :icon="Plus" label="새 모임" class="mt-0.5" />
+    <!-- 새 모임 → 모임 관리(S9)로 가며 생성 모달 자동 오픈 -->
+    <NavItem
+      :as="RouterLink"
+      :to="{ path: '/groups', query: { create: 'group' } }"
+      :icon="Plus"
+      label="새 모임"
+      class="mt-0.5"
+    />
   </aside>
 </template>

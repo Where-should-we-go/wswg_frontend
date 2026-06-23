@@ -2,8 +2,8 @@
 // S9 모임 관리 `/groups` — 앱 셸 본문 캔버스.
 // 데스크탑: 2분할(좌 모임 리스트 / 우 상세 패널).
 // 모바일: 1열 리스트 → 카드 탭 시 상세로 push(인-뷰 전환), 생성·초대·멤버추가는 풀스크린 시트.
-import { ref, computed, onMounted } from 'vue'
-import { useRouter } from 'vue-router'
+import { ref, computed, onMounted, watch } from 'vue'
+import { useRouter, useRoute } from 'vue-router'
 import { Plus, ChevronLeft, RefreshCcw } from '@lucide/vue'
 import { toast } from 'vue-sonner'
 import { Button } from '@/components/ui/button'
@@ -20,6 +20,7 @@ import RemoveMemberDialog from '@/features/group/components/RemoveMemberDialog.v
 import { useIsMobile } from '@/features/group/composables/useIsMobile'
 
 const router = useRouter()
+const route = useRoute()
 const { isMobile } = useIsMobile()
 
 // 리스트 상태
@@ -44,6 +45,19 @@ const removeTarget = ref(null)
 const mobileShowDetail = ref(false)
 
 const hasGroups = computed(() => groups.value.length > 0)
+
+// 사이드바 "새 모임"이 /groups?create=group 로 보내면 생성 모달을 연다.
+watch(
+  () => route.query.create,
+  (v) => {
+    if (v === 'group') {
+      createOpen.value = true
+      // 다시 열 수 있도록 쿼리는 비운다.
+      router.replace({ path: '/groups', query: {} })
+    }
+  },
+  { immediate: true },
+)
 
 async function loadGroups({ keepSelection = false } = {}) {
   listLoading.value = true

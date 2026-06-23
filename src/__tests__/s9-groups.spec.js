@@ -20,20 +20,21 @@ vi.mock('vue-sonner', () => ({
   toast: { error: vi.fn(), success: vi.fn() },
 }))
 
-const push = vi.fn()
+const { push, replace } = vi.hoisted(() => ({ push: vi.fn(), replace: vi.fn() }))
+
+vi.mock('vue-router', () => ({
+  useRouter: () => ({ push, replace }),
+  useRoute: () => ({ query: {} }),
+  RouterLink: { template: '<a><slot /></a>' },
+}))
+
 const stubs = {
   RouterLink: { template: '<a><slot /></a>' },
 }
 
 function factory() {
   return mount(GroupsView, {
-    global: {
-      stubs,
-      mocks: {
-        $router: { push },
-        $route: { query: {} },
-      },
-    },
+    global: { stubs },
   })
 }
 
