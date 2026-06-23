@@ -22,6 +22,8 @@ const props = defineProps({
   blocks: { type: Array, default: () => [] },
   // 편집 중 presence 맵: { [blockId]: { name, color } }
   editors: { type: Object, default: () => ({}) },
+  // 업로드 중 미디어 개수 맵: { [blockId]: count }
+  uploading: { type: Object, default: () => ({}) },
   readonly: { type: Boolean, default: false },
 })
 
@@ -33,6 +35,8 @@ const emit = defineEmits([
   'block-dragstart',
   'block-dragend',
   'drop-on-day',
+  'reorder-drop',
+  'upload-media',
 ])
 
 const open = ref(true)
@@ -113,12 +117,15 @@ const grouped = computed(() => {
             v-else
             :block="b"
             :editor="editors[b.id] ?? null"
+            :uploading-count="uploading[b.id] ?? 0"
             :readonly="readonly"
             @edit-title="(id, t) => emit('edit-title', id, t)"
             @add-after="(id) => emit('add-after', id)"
             @open-menu="(blk) => emit('open-menu', blk)"
             @dragstart="(id) => emit('block-dragstart', id)"
             @dragend="emit('block-dragend')"
+            @reorder-drop="(id) => emit('reorder-drop', id)"
+            @upload-media="(id, files) => emit('upload-media', id, files)"
           />
         </template>
       </template>
@@ -131,12 +138,15 @@ const grouped = computed(() => {
           v-else
           :block="b"
           :editor="editors[b.id] ?? null"
+          :uploading-count="uploading[b.id] ?? 0"
           :readonly="readonly"
           @edit-title="(id, t) => emit('edit-title', id, t)"
           @add-after="(id) => emit('add-after', id)"
           @open-menu="(blk) => emit('open-menu', blk)"
           @dragstart="(id) => emit('block-dragstart', id)"
           @dragend="emit('block-dragend')"
+          @reorder-drop="(id) => emit('reorder-drop', id)"
+          @upload-media="(id, files) => emit('upload-media', id, files)"
         />
       </template>
 

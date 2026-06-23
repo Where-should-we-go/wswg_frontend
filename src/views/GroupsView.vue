@@ -16,6 +16,7 @@ import GroupCreateDialog from '@/features/group/components/GroupCreateDialog.vue
 import GroupDetailPanel from '@/features/group/components/GroupDetailPanel.vue'
 import InviteLinkDialog from '@/features/group/components/InviteLinkDialog.vue'
 import AddMemberDialog from '@/features/group/components/AddMemberDialog.vue'
+import RemoveMemberDialog from '@/features/group/components/RemoveMemberDialog.vue'
 import { useIsMobile } from '@/features/group/composables/useIsMobile'
 
 const router = useRouter()
@@ -36,6 +37,8 @@ const removingId = ref(null)
 const createOpen = ref(false)
 const inviteOpen = ref(false)
 const addMemberOpen = ref(false)
+const removeOpen = ref(false)
+const removeTarget = ref(null)
 
 // 모바일: 상세 화면으로 전환했는지
 const mobileShowDetail = ref(false)
@@ -81,24 +84,34 @@ function backToList() {
 }
 
 function onCreated(group) {
-  toast.success('새 모임을 만들었어요!')
+  toast.success('모임을 만들었어요! 이제 친구를 불러볼까요?')
   loadGroups({ keepSelection: true })
   if (group?.groupId != null) selectGroup(group.groupId)
 }
 
-function onMemberAdded() {
-  toast.success('멤버를 추가했어요!')
+function onMemberAdded(member) {
+  // §9 정본: 추가된 멤버 이름을 넣어 "OO님이 모임에 들어왔어요".
+  const name = member?.name?.trim() || member?.email?.trim() || '새 친구'
+  toast.success(`${name}님이 모임에 들어왔어요`)
   if (selectedId.value != null) loadDetail(selectedId.value)
   loadGroups({ keepSelection: true })
 }
 
-async function onRemoveMember(member) {
+function onRemoveMember(member) {
   if (selectedId.value == null) return
-  if (!window.confirm(`'${member.name}'님을 모임에서 제거할까요?`)) return
+  removeTarget.value = member
+  removeOpen.value = true
+}
+
+async function confirmRemoveMember() {
+  const member = removeTarget.value
+  if (selectedId.value == null || member == null) return
   removingId.value = member.userId
   try {
     await removeMember(selectedId.value, member.userId)
     toast.success('멤버를 제거했어요.')
+    removeOpen.value = false
+    removeTarget.value = null
     await loadDetail(selectedId.value)
     loadGroups({ keepSelection: true })
   } catch {
@@ -236,5 +249,11 @@ onMounted(() => loadGroups())
     <GroupCreateDialog v-model:open="createOpen" @created="onCreated" />
     <InviteLinkDialog v-model:open="inviteOpen" :group-id="selectedId" />
     <AddMemberDialog v-model:open="addMemberOpen" :group-id="selectedId" @added="onMemberAdded" />
+    <RemoveMemberDialog
+      v-model:open="removeOpen"
+      :member="removeTarget"
+      :loading="removingId != null"
+      @confirm="confirmRemoveMember"
+    />
   </div>
 </template>

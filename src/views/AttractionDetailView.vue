@@ -40,7 +40,8 @@ const adding = ref(false)
 
 const contentId = computed(() => route.params.id)
 
-// 반응형: 데스크탑은 Dialog, 모바일(<640)은 바텀시트로 대상 여행 선택.
+// 반응형: 데스크탑(≥1024)은 Dialog, 모바일/태블릿(<1024)은 바텀시트로 대상 여행 선택.
+// 디자인시스템 §7.2 데스크탑 경계 1024(lg).
 const isDesktop = ref(true)
 let mq
 function syncViewport(e) {
@@ -48,7 +49,7 @@ function syncViewport(e) {
 }
 onMounted(() => {
   if (typeof window !== 'undefined' && window.matchMedia) {
-    mq = window.matchMedia('(min-width: 640px)')
+    mq = window.matchMedia('(min-width: 1024px)')
     isDesktop.value = mq.matches
     mq.addEventListener('change', syncViewport)
   }
@@ -123,7 +124,8 @@ function goSearch() {
 async function onAddClick() {
   if (!isAuthenticated()) {
     toast('내 여행에 담으려면 로그인이 필요해요.')
-    router.push('/login')
+    // 로그인 후 이 상세로 복귀하도록 의도 보존.
+    router.push({ name: 'login', query: { redirect: route.fullPath } })
     return
   }
   pickerOpen.value = true

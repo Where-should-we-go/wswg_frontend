@@ -94,7 +94,11 @@ function handleLogin(provider) {
 
           <!-- 약관 마이크로카피 -->
           <p class="pt-2 text-center text-xs leading-relaxed text-[var(--ink-3)]">
-            로그인하면 이용약관과 개인정보 처리방침에 동의하는 것으로 볼게요
+            로그인하면
+            <a href="/terms" class="text-[var(--link)] underline underline-offset-2">이용약관</a>과
+            <a href="/privacy" class="text-[var(--link)] underline underline-offset-2"
+              >개인정보 처리방침</a
+            >에 동의하는 것으로 볼게요
           </p>
         </CardContent>
       </Card>

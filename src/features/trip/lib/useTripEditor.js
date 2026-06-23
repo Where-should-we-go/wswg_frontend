@@ -168,6 +168,15 @@ export function useTripEditor(initialTrip) {
     scheduleSave()
   }
 
+  // 미디어 append(E1 업로드). 업로드된 { type, url, metadata } 를 블록 media[] 끝에 더한다.
+  function addMedia(blockId, media) {
+    const b = findBlock(blockId)
+    if (!b) return
+    if (!Array.isArray(b.media)) b.media = []
+    b.media.push(media)
+    scheduleSave()
+  }
+
   // 대표 미디어 선정(갤러리). 한 블록의 한 미디어를 대표로 표시.
   function setRepresentative(blockId, mediaIndex) {
     for (const b of items.value) {
@@ -201,6 +210,7 @@ export function useTripEditor(initialTrip) {
     removeBlock,
     moveBlockToDate,
     reorderWithin,
+    addMedia,
     setRepresentative,
     setTitle,
   }

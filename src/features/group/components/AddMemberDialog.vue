@@ -1,5 +1,6 @@
 <script setup>
-// 멤버 추가 — 이름으로 멤버를 직접 추가해요(addMember). v-model:open.
+// 멤버 추가 — 이름이나 이메일로 멤버를 직접 추가해요(addMember). v-model:open.
+// §5·§6 정본이 이메일 기반 초대를 언급 → 입력값에 @ 가 있으면 email, 아니면 name 으로 보냄.
 // 데스크탑: 모달 / 모바일: 풀스크린 바텀시트.
 import { ref, watch } from 'vue'
 import { UserPlus } from '@lucide/vue'
@@ -19,12 +20,17 @@ const emit = defineEmits(['update:open', 'added'])
 
 const { isMobile } = useIsMobile()
 
-const name = ref('')
+const query = ref('')
 const submitting = ref(false)
 const errorMsg = ref('')
 
 function isValid() {
-  return name.value.trim().length >= 1
+  return query.value.trim().length >= 1
+}
+
+// @ 가 들어 있으면 이메일로, 아니면 이름으로 추가해요.
+function toPayload(value) {
+  return value.includes('@') ? { email: value } : { name: value }
 }
 
 async function submit() {
@@ -32,9 +38,9 @@ async function submit() {
   submitting.value = true
   errorMsg.value = ''
   try {
-    const member = await addMember(props.groupId, { name: name.value.trim() })
+    const member = await addMember(props.groupId, toPayload(query.value.trim()))
     emit('added', member)
-    name.value = ''
+    query.value = ''
     emit('update:open', false)
   } catch (e) {
     errorMsg.value = e.message ?? '멤버를 추가하지 못했어요. 다시 시도해 주세요.'
@@ -47,7 +53,7 @@ watch(
   () => props.open,
   (open) => {
     if (!open) {
-      name.value = ''
+      query.value = ''
       errorMsg.value = ''
       submitting.value = false
     }
@@ -77,15 +83,17 @@ watch(
           :is="isMobile ? SheetDescription : DialogDescription"
           class="text-[13px] text-[var(--ink-2)]"
         >
-          함께 여행할 친구의 이름을 적어 주세요.
+          함께 여행할 친구의 이름이나 이메일을 적어 주세요.
         </component>
       </component>
 
       <div class="flex flex-col gap-2 px-1">
-        <p class="text-[11.5px] font-bold tracking-[0.05em] text-[var(--ink-3)] uppercase">이름</p>
+        <p class="text-[11.5px] font-bold tracking-[0.05em] text-[var(--ink-3)] uppercase">
+          이름 또는 이메일
+        </p>
         <Input
-          v-model="name"
-          placeholder="예: 이민지"
+          v-model="query"
+          placeholder="예: 이민지 또는 minji@email.com"
           :aria-invalid="!!errorMsg"
           @keydown.enter="submit"
         />

@@ -3,7 +3,7 @@
 // 앱 셸 안에서 본문 캔버스만 렌더. 지역·기간·인원·스타일 칩 → "자동 생성 ✨" →
 // 진행 인디케이터 오버레이 → autoGeneratePlan → /trips/{tripId} 이동.
 import { computed, onMounted, ref, watch } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { Sparkles } from '@lucide/vue'
 import { toast } from 'vue-sonner'
 import { Button } from '@/components/ui/button'
@@ -14,16 +14,22 @@ import { autoGeneratePlan } from '@/services/trips'
 import { getGroups } from '@/services/groups'
 import StyleChipGroup from '@/features/plan/StyleChipGroup.vue'
 import FormSummaryBar from '@/features/plan/FormSummaryBar.vue'
+import EmptyState from '@/components/common/EmptyState.vue'
 
 const router = useRouter()
+const route = useRoute()
 
 const STYLE_OPTIONS = [
-  { label: '자연', emoji: '🌿' },
-  { label: '도보', emoji: '🚶' },
+  { label: '바다', emoji: '🌊' },
   { label: '맛집', emoji: '🍜' },
+  { label: '자연', emoji: '🏞️' },
   { label: '문화', emoji: '🏛️' },
-  { label: '힐링', emoji: '🌊' },
-  { label: '액티비티', emoji: '🎢' },
+  { label: '카페', emoji: '☕' },
+  { label: '액티비티', emoji: '🎡' },
+  { label: '쇼핑', emoji: '🛍️' },
+  { label: '도보', emoji: '🚶' },
+  { label: '야경', emoji: '🌙' },
+  { label: '힐링', emoji: '🧘' },
 ]
 
 // ── 옵션 로드 ────────────────────────────────────────────────
@@ -41,6 +47,14 @@ const styles = ref([])
 const groupId = ref(undefined)
 
 const generating = ref(false)
+// 후보 0건(empty) · 권한 403 · 모임 없음 → 화면에 머물며 EmptyState/안내 표시.
+const emptyResult = ref(false)
+const forbidden = ref(false)
+
+// 라우트 쿼리로 모임 진입했는지.
+const enteredAsGroup = computed(() => route.query.groupId != null)
+// 모임 진입인데 선택 가능한 모임이 없을 때(옵션 로드 후 판정).
+const noGroups = ref(false)
 
 const sidoOptions = computed(() =>
   sidos.value.map((s) => ({ value: s.sidoCode, label: s.sidoName })),
@@ -57,6 +71,16 @@ onMounted(async () => {
   const [s, g] = await Promise.all([getSidos(), getGroups()])
   sidos.value = s
   groups.value = g
+  // 모임 진입(?groupId=)인데 선택 가능한 모임이 없으면 빈 상태로.
+  if (enteredAsGroup.value && g.length === 0) {
+    noGroups.value = true
+    return
+  }
+  // 쿼리로 들어온 모임을 기본 선택.
+  if (enteredAsGroup.value) {
+    const q = Number(route.query.groupId)
+    if (g.some((it) => it.groupId === q)) groupId.value = q
+  }
 })
 
 // 시/도 바뀌면 구/군 다시 로드 + 선택 초기화.
@@ -108,8 +132,10 @@ const canGenerate = computed(
 async function generate() {
   if (!canGenerate.value) return
   generating.value = true
+  emptyResult.value = false
+  forbidden.value = false
   try {
-    const { tripId, partial } = await autoGeneratePlan({
+    const { tripId, partial, empty } = await autoGeneratePlan({
       sidoCode: sidoCode.value,
       gugunCode: gugunCode.value,
       startDate: startDate.value,
@@ -118,14 +144,32 @@ async function generate() {
       styles: styles.value,
       groupId: groupId.value,
     })
+    // 후보 0건 → 이동하지 않고 화면 잔류(입력 보존) + EmptyState.
+    if (empty || tripId == null) {
+      emptyResult.value = true
+      generating.value = false
+      return
+    }
     await router.push(`/trips/${tripId}`)
     if (partial) {
-      toast('일정 일부만 채웠어요. 빈 곳은 직접 더해 볼까요?')
+      toast('후보가 적어 일부만 채웠어요')
     }
-  } catch {
-    toast.error('일정을 짜다가 문제가 생겼어요. 잠시 후 다시 시도해 주세요.')
+  } catch (err) {
     generating.value = false
+    // 비멤버 groupId → 개인 여행 전환 안내(입력 보존).
+    if (err?.status === 403) {
+      forbidden.value = true
+      toast.error('이 여행은 모임 멤버만 만들 수 있어요')
+      return
+    }
+    toast.error('일정을 짜다가 문제가 생겼어요. 잠시 후 다시 시도해 주세요.')
   }
+}
+
+// 403 안내에서 개인 여행으로 전환(groupId 비우기).
+function switchToPersonal() {
+  groupId.value = undefined
+  forbidden.value = false
 }
 
 function cancel() {
@@ -136,13 +180,24 @@ function cancel() {
 <template>
   <div class="relative mx-auto w-full max-w-3xl px-4 py-8 text-[var(--ink)] sm:px-6 sm:py-12">
     <header class="mb-6">
-      <h1 class="text-2xl font-bold">여행 자동 생성</h1>
+      <h1 class="text-2xl font-bold">어디로, 어떤 여행을 떠나볼까요?</h1>
       <p class="mt-1 text-sm text-[var(--ink-2)]">
-        가고 싶은 곳과 취향만 알려주시면 일정을 대신 짜 드려요.
+        지역과 스타일만 고르면, 일정은 저희가 짜드릴게요.
       </p>
     </header>
 
+    <!-- 모임 없음 빈 상태(모임 진입인데 선택 가능 모임 없음) -->
+    <EmptyState
+      v-if="noGroups"
+      icon="👥"
+      title="함께 갈 모임부터 만들어볼까요?"
+      description="여행을 같이 짤 모임이 아직 없어요. 모임을 먼저 만들면 함께 떠날 수 있어요."
+    >
+      <Button type="button" @click="router.push('/groups')">모임 만들러 가기</Button>
+    </EmptyState>
+
     <!-- 폼 캔버스 -->
+    <template v-else>
     <div
       class="relative rounded-[var(--radius-win)] border border-[var(--border)] bg-[var(--card)] p-5 shadow-[var(--shadow-win)] sm:p-7"
     >
@@ -227,6 +282,28 @@ function cancel() {
       </div>
     </div>
 
+    <!-- 권한 403: 비멤버 groupId 안내 + 개인 여행 전환 -->
+    <div
+      v-if="forbidden"
+      class="mt-4 rounded-[var(--radius-win)] border border-[var(--danger)] bg-[var(--card)] p-4 text-sm"
+    >
+      <p class="font-medium text-[var(--danger)]">이 여행은 모임 멤버만 만들 수 있어요</p>
+      <p class="mt-1 text-[var(--ink-2)]">
+        개인 여행으로 바꾸면 바로 만들 수 있어요. 모임 선택을 비워 볼까요?
+      </p>
+      <Button type="button" variant="outline" class="mt-3" @click="switchToPersonal">
+        개인 여행으로 전환
+      </Button>
+    </div>
+
+    <!-- 후보 0건: 이동하지 않고 이 화면에 머물며 안내(입력 보존) -->
+    <EmptyState
+      v-if="emptyResult"
+      icon="🗺️"
+      title="이 조건엔 갈 곳이 부족해요. 지역이나 스타일을 바꿔볼까요?"
+      class="mt-4"
+    />
+
     <!-- 액션바 (데스크탑: 캔버스 아래 / 모바일: 하단 고정 풀폭) -->
     <div
       class="fixed inset-x-0 bottom-0 z-20 flex flex-col gap-3 border-t border-[var(--border)] bg-[var(--card)] p-4 sm:static sm:mt-5 sm:flex-row sm:items-center sm:justify-between sm:rounded-[var(--radius-win)] sm:border sm:p-4 sm:shadow-[var(--shadow-win)]"
@@ -263,7 +340,8 @@ function cancel() {
       </div>
     </div>
 
-    <!-- 모바일 고정 액션바에 본문이 가리지 않도록 여백 -->
-    <div class="h-28 sm:hidden" aria-hidden="true" />
+      <!-- 모바일 고정 액션바에 본문이 가리지 않도록 여백 -->
+      <div class="h-28 sm:hidden" aria-hidden="true" />
+    </template>
   </div>
 </template>

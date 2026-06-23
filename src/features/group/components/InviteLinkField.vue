@@ -38,6 +38,10 @@ async function copy(url) {
         {{ copied ? '복사했어요' : '복사' }}
       </Button>
     </div>
-    <p class="text-[12px] text-[var(--ink-3)]">{{ link.expiresAt }}</p>
+    <!-- §9 정본 안내문: 서버 expiresAt raw 대신 고정 카피. -->
+    <p class="text-[13px] text-[var(--ink-2)]">이 링크를 친구에게 보내면 바로 같이 다닐 수 있어요</p>
+    <p class="text-[12px] text-[var(--ink-3)]">
+      링크는 일정 시간 뒤 만료돼요<template v-if="link.expiresAt"> · {{ link.expiresAt }}</template>
+    </p>
   </div>
 </template>

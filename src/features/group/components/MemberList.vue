@@ -25,6 +25,9 @@ const rows = computed(() =>
   })),
 )
 
+// 멤버가 생성자 1명뿐이면 동행인을 부르도록 안내해요(§7 빈 카피).
+const isSolo = computed(() => props.members.length <= 1)
+
 function roleLabel(role) {
   return role === 'OWNER' ? '관리자' : '멤버'
 }
@@ -66,4 +69,8 @@ function roleLabel(role) {
       </Button>
     </li>
   </ul>
+
+  <p v-if="isSolo" class="px-2 py-2 text-[13px] text-[var(--ink-3)]">
+    아직 동행인이 없어요, 링크로 친구를 불러보세요
+  </p>
 </template>

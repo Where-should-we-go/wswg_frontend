@@ -5,8 +5,9 @@
 //   Z3 뷰 탭: 📅 일정 / 🖼️ 갤러리 / 🗺️ 지도 / 📋 보드.
 //   일정 뷰: 보조 토글로 레일 ↔ 캘린더 전환.
 // 편집은 useTripEditor 로컬 낙관적 → updateTrip 전체 저장. 실시간(WS)은 mock stub.
-import { ref } from 'vue'
+import { ref, reactive, computed } from 'vue'
 import { toast } from 'vue-sonner'
+import { uploadMedia } from '@/services/trips'
 import { AvatarStack } from '@/components/ui/avatar-stack'
 import { LiveIndicator } from '@/components/ui/live-indicator'
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet'
@@ -36,17 +37,62 @@ const ed = useTripEditor(props.trip)
 // 일정 뷰 보조 토글: 'rail' | 'calendar'
 const scheduleMode = ref('rail')
 
-// 블록 드래그(보드 외 일정뷰 day 간 이동)
+// 블록 드래그: 같은 날 블록 위로 드롭 → 순서 변경(reorder), 다른 날 섹션 위로 드롭 → 날짜 이동.
 const draggingBlockId = ref(null)
+// reorder-drop(블록 위)이 먼저 발생하면 이후 day 드롭은 무시(중복 방지).
+const reorderHandled = ref(false)
 function onBlockDragStart(id) {
   draggingBlockId.value = id
+  reorderHandled.value = false
 }
 function onBlockDragEnd() {
   draggingBlockId.value = null
+  reorderHandled.value = false
 }
 function onDropOnDay(date) {
-  if (draggingBlockId.value) ed.moveBlockToDate(draggingBlockId.value, date)
+  if (draggingBlockId.value && !reorderHandled.value) ed.moveBlockToDate(draggingBlockId.value, date)
   draggingBlockId.value = null
+  reorderHandled.value = false
+}
+// 같은 날 안에서 targetId 블록 위로 드롭 → 끄는 블록을 target 앞으로 재배치.
+function onReorderDrop(targetId) {
+  const dragId = draggingBlockId.value
+  if (!dragId || dragId === targetId) return
+  const drag = ed.findBlock(dragId)
+  const target = ed.findBlock(targetId)
+  if (!drag || !target || drag.visitDate !== target.visitDate) return // 다른 날은 day 드롭이 처리
+  reorderHandled.value = true
+  const day = ed.days.value.find((d) => d.date === drag.visitDate)
+  if (!day) return
+  const ordered = day.blocks.map((b) => b.id).filter((id) => id !== dragId)
+  const at = ordered.indexOf(targetId)
+  ordered.splice(at < 0 ? ordered.length : at, 0, dragId)
+  ed.reorderWithin(drag.visitDate, ordered)
+}
+
+// ── 미디어 업로드(E1) — 블록당 업로드 중 카운트로 스켈레톤 표시 ──
+const uploading = reactive({})
+async function onUploadMedia(blockId, files) {
+  for (const file of files) {
+    uploading[blockId] = (uploading[blockId] ?? 0) + 1
+    const fd = new FormData()
+    const mediaType = file.type.startsWith('video/') ? 'VIDEO' : 'PHOTO'
+    fd.append('file', file)
+    fd.append('blockId', blockId)
+    fd.append('mediaType', mediaType)
+    try {
+      const res = await uploadMedia(ed.trip.value.trip_id, fd)
+      // mock 은 빈 url 을 주므로, 미리보기 objectURL 로 폴백(흐름·UI 동작 우선).
+      const url = res?.url || URL.createObjectURL(file)
+      ed.addMedia(blockId, { type: res?.mediaType ?? mediaType, url, metadata: res?.metadata ?? {} })
+      toast.success('추억이 더해졌어요')
+    } catch {
+      toast.error('사진을 올리지 못했어요. 잠시 후 다시 시도해 주세요')
+    } finally {
+      uploading[blockId] = Math.max(0, (uploading[blockId] ?? 1) - 1)
+      if (uploading[blockId] === 0) delete uploading[blockId]
+    }
+  }
 }
 
 // 블록 추가(슬래시/+ 행). 추가 후 토스트.
@@ -59,13 +105,55 @@ function onAddAfter(id) {
   if (b) onAddBlock(b.type, b.visitDate)
 }
 
-// 블록 메뉴(⋮): 데스크탑·모바일 공용 시트.
+// 블록 메뉴(⋮): 데스크탑·모바일 공용 시트. 시간·속성 인라인 편집도 여기서.
 const menuBlock = ref(null)
+// 편집 폼 드래프트(시트 열 때 블록 값으로 채움). durationMin 은 정본(분).
+const form = reactive({ time: '', durationMin: '', budget: '', rating: '', memo: '' })
 function openMenu(block) {
   menuBlock.value = block
+  form.time = block.time ?? ''
+  form.durationMin = block.durationMin ?? ''
+  form.budget = block.properties?.budget ?? ''
+  form.rating = block.properties?.rating ?? ''
+  form.memo = block.properties?.memo ?? ''
 }
 function closeMenu() {
   menuBlock.value = null
+}
+
+// 메뉴에 시간/속성 행을 보일지(이동·메모는 일부만 의미). 일단 전부 노출하되 메모는 항상.
+const showSchedule = computed(() => !!menuBlock.value && menuBlock.value.type !== '메모')
+
+// 시간(HH:mm) 저장. 빈 값 → null(시간 미정).
+function commitTime() {
+  if (!menuBlock.value) return
+  ed.patchBlock(menuBlock.value.id, { time: form.time || null })
+}
+// 소요시간(분) 저장 — durationMin 정본(문자열 duration 저장 금지). 빈/0 이하 → null.
+function commitDuration() {
+  if (!menuBlock.value) return
+  const n = Number(form.durationMin)
+  ed.patchBlock(menuBlock.value.id, {
+    durationMin: form.durationMin === '' || Number.isNaN(n) || n <= 0 ? null : n,
+  })
+}
+// 예산(원) 저장. 빈/0 이하 → 키 제거.
+function commitBudget() {
+  if (!menuBlock.value) return
+  const n = Number(form.budget)
+  ed.patchProperty(menuBlock.value.id, 'budget', form.budget === '' || Number.isNaN(n) || n <= 0 ? '' : n)
+}
+// 평점(0~5) 저장. 빈/범위밖 → 키 제거.
+function commitRating() {
+  if (!menuBlock.value) return
+  const n = Number(form.rating)
+  const ok = form.rating !== '' && !Number.isNaN(n) && n >= 0 && n <= 5
+  ed.patchProperty(menuBlock.value.id, 'rating', ok ? n : '')
+}
+// 메모 저장. 빈 → 키 제거.
+function commitMemo() {
+  if (!menuBlock.value) return
+  ed.patchProperty(menuBlock.value.id, 'memo', form.memo)
 }
 function deleteBlock() {
   if (menuBlock.value) {
@@ -202,6 +290,7 @@ function syncLabel() {
             :date="d.date"
             :blocks="d.blocks"
             :editors="ed.editorsByBlock.value"
+            :uploading="uploading"
             @edit-title="(id, t) => ed.patchBlock(id, { title: t })"
             @add-block="onAddBlock"
             @add-after="onAddAfter"
@@ -209,6 +298,8 @@ function syncLabel() {
             @block-dragstart="onBlockDragStart"
             @block-dragend="onBlockDragEnd"
             @drop-on-day="onDropOnDay"
+            @reorder-drop="onReorderDrop"
+            @upload-media="onUploadMedia"
           />
         </template>
 
@@ -264,6 +355,80 @@ function syncLabel() {
           </SheetTitle>
         </SheetHeader>
         <div class="flex flex-col gap-1 px-4 pb-6">
+          <!-- 시간·소요시간·속성 인라인 편집(D4) -->
+          <div class="mb-3 flex flex-col gap-2.5">
+            <div v-if="showSchedule" class="flex gap-2">
+              <label class="flex-1 text-[11.5px] text-[var(--ink-3)]">
+                시작 시각
+                <input
+                  v-model="form.time"
+                  type="time"
+                  class="mt-0.5 w-full rounded-[var(--radius-sm)] border border-[var(--border)] bg-[var(--background)] px-2 py-1.5 text-[13.5px] text-[var(--foreground)] outline-none focus:border-[var(--brand)]"
+                  @change="commitTime"
+                  @blur="commitTime"
+                />
+              </label>
+              <label class="flex-1 text-[11.5px] text-[var(--ink-3)]">
+                소요시간(분)
+                <input
+                  v-model="form.durationMin"
+                  type="number"
+                  min="0"
+                  step="15"
+                  inputmode="numeric"
+                  placeholder="예: 90"
+                  class="mt-0.5 w-full rounded-[var(--radius-sm)] border border-[var(--border)] bg-[var(--background)] px-2 py-1.5 text-[13.5px] text-[var(--foreground)] tabular-nums outline-none focus:border-[var(--brand)]"
+                  @change="commitDuration"
+                  @blur="commitDuration"
+                />
+              </label>
+            </div>
+            <div class="flex gap-2">
+              <label class="flex-1 text-[11.5px] text-[var(--ink-3)]">
+                💰 예산(원)
+                <input
+                  v-model="form.budget"
+                  type="number"
+                  min="0"
+                  step="1000"
+                  inputmode="numeric"
+                  placeholder="예: 9000"
+                  class="mt-0.5 w-full rounded-[var(--radius-sm)] border border-[var(--border)] bg-[var(--background)] px-2 py-1.5 text-[13.5px] text-[var(--foreground)] tabular-nums outline-none focus:border-[var(--brand)]"
+                  @change="commitBudget"
+                  @blur="commitBudget"
+                />
+              </label>
+              <label class="flex-1 text-[11.5px] text-[var(--ink-3)]">
+                ⭐ 평점(0~5)
+                <input
+                  v-model="form.rating"
+                  type="number"
+                  min="0"
+                  max="5"
+                  step="0.5"
+                  inputmode="decimal"
+                  placeholder="예: 4.5"
+                  class="mt-0.5 w-full rounded-[var(--radius-sm)] border border-[var(--border)] bg-[var(--background)] px-2 py-1.5 text-[13.5px] text-[var(--foreground)] tabular-nums outline-none focus:border-[var(--brand)]"
+                  @change="commitRating"
+                  @blur="commitRating"
+                />
+              </label>
+            </div>
+            <label class="text-[11.5px] text-[var(--ink-3)]">
+              📝 메모
+              <textarea
+                v-model="form.memo"
+                rows="2"
+                placeholder="자유롭게 적어 주세요"
+                class="mt-0.5 w-full resize-none rounded-[var(--radius-sm)] border border-[var(--border)] bg-[var(--background)] px-2 py-1.5 text-[13.5px] text-[var(--foreground)] outline-none focus:border-[var(--brand)]"
+                @change="commitMemo"
+                @blur="commitMemo"
+              />
+            </label>
+          </div>
+
+          <div class="my-1 h-px bg-[var(--border)]" />
+
           <p class="px-1 pb-1 text-[11.5px] text-[var(--ink-3)]">다른 날로 옮기기</p>
           <div class="flex flex-wrap gap-1.5">
             <button

@@ -6,6 +6,7 @@ import PlanNewView from '@/views/PlanNewView.vue'
 const push = vi.fn()
 vi.mock('vue-router', () => ({
   useRouter: () => ({ push, back: vi.fn() }),
+  useRoute: () => ({ query: {} }),
 }))
 
 function mountView() {
@@ -20,7 +21,7 @@ describe('S5 여행 자동 생성', () => {
   it('폼 캔버스와 생성 버튼이 렌더된다', async () => {
     const wrapper = mountView()
     await flushPromises()
-    expect(wrapper.text()).toContain('여행 자동 생성')
+    expect(wrapper.text()).toContain('어디로, 어떤 여행을 떠나볼까요?')
     expect(wrapper.text()).toContain('자동 생성')
     // 스타일 칩이 그려진다.
     expect(wrapper.text()).toContain('자연')

@@ -79,12 +79,16 @@ export async function createTrip(body) {
 
 // ── 자동 생성 (S5, D2) ───────────────────────────────────────
 // body: { sidoCode, gugunCode?, startDate, endDate, headcount, styles[], groupId? }
-// 반환: { tripId, partial }
+// 반환: { tripId, partial, empty } — 후보 0건이면 trip 을 만들지 않고 { tripId:null, empty:true }.
 export async function autoGeneratePlan(body) {
   if (USE_MOCK) {
     await mockDelay(1600) // "일정을 짜고 있어요…" 체감용
     const sido = db.SIDOS.find((s) => s.sidoCode === Number(body.sidoCode))
     const pool = db.ATTRACTIONS.filter((a) => a.sidoCode === Number(body.sidoCode))
+    // 후보 0건 → 생성하지 않고 화면 잔류 신호(S5 EmptyState).
+    if (pool.length === 0) {
+      return { tripId: null, partial: true, empty: true }
+    }
     const days = dayList(body.startDate, body.endDate)
     const items = []
     let idSeq = 0
