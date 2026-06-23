@@ -30,6 +30,15 @@ export default defineConfig([
     files: ['src/**/__tests__/*'],
   },
 
+  // shadcn-vue 기반 공용 UI 프리미티브는 단어 1개 이름(Button·Tabs·Sheet…)이 관례.
+  {
+    name: 'app/ui-primitives',
+    files: ['src/components/ui/**/*.vue'],
+    rules: {
+      'vue/multi-word-component-names': 'off',
+    },
+  },
+
   ...pluginOxlint.buildFromOxlintConfigFile('.oxlintrc.json'),
 
   skipFormatting,

@@ -69,9 +69,9 @@ defineProps({
     </button>
 
     <!-- nav -->
-    <NavItem :as="RouterLink" to="/places" :icon="Search" label="검색" />
-    <NavItem :as="RouterLink" to="/" :icon="Home" label="홈" />
-    <NavItem :as="RouterLink" to="/map" :icon="Map" label="그룹 지도" />
+    <NavItem :as="RouterLink" to="/attractions" :icon="Search" label="검색" />
+    <NavItem :as="RouterLink" to="/mypage" :icon="Home" label="홈" />
+    <NavItem :as="RouterLink" to="/groups" :icon="Map" label="모임" />
 
     <!-- 내 여행 -->
     <div
