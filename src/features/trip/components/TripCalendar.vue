@@ -137,6 +137,8 @@ function onGrab(ev, block, fromTray = false) {
   ev.preventDefault()
   const startMin = fromTray ? null : timeToMinutes(block.time)
   const grabOffsetMin = fromTray || startMin == null ? 0 : pointToMin(ev.clientY) - startMin
+  // 잡은 지점 오프셋·카드 크기 — 떠다니는 클론이 커서를 1:1 로 따라가도록(들고 있는 느낌).
+  const r = ev.currentTarget?.getBoundingClientRect?.()
   drag.value = {
     id: block.id,
     block,
@@ -144,6 +146,12 @@ function onGrab(ev, block, fromTray = false) {
     fromTray,
     durationMin: durationOf(block),
     grabOffsetMin,
+    grabDX: r ? ev.clientX - r.left : 0,
+    grabDY: r ? ev.clientY - r.top : 0,
+    cloneW: r ? r.width : DAY_COL_W - 14,
+    cloneH: r ? r.height : heightFor(block, durationOf(block)),
+    pointerX: ev.clientX,
+    pointerY: ev.clientY,
     preview: null,
   }
   updateMovePreview(ev)
@@ -153,6 +161,9 @@ function onGrab(ev, block, fromTray = false) {
 function updateMovePreview(ev) {
   const d = drag.value
   if (!d) return
+  // 클론이 커서를 1:1 로 따라가도록 raw 포인터 좌표 갱신.
+  d.pointerX = ev.clientX
+  d.pointerY = ev.clientY
   const colIndex = pointToColIndex(ev.clientX)
   const date = days.value[colIndex]?.date
   const minStart = range.value.startHour * 60
@@ -165,24 +176,28 @@ function updateMovePreview(ev) {
     colIndex,
     date,
     top: topFor(startMin),
-    rawTop: topFor(rawStartMin),
     height: heightFor(d.block, d.durationMin),
     startMin,
     durationMin: d.durationMin,
   }
 }
 
-// 떠다니는 클론(집어 든 블록) — 이동 모드에서 커서를 따라가며 실제 카드처럼 보인다.
-// 트레이 위(해제 모드)에선 숨긴다.
+// 떠다니는 클론(집어 든 블록) — 이동 모드에서 커서를 X·Y 1:1 로 따라간다(fixed, 화면 기준).
+// 트레이 위(해제 모드)에선 숨긴다. 격자 스냅은 착지 가이드가 따로 보여준다.
 const dragClone = computed(() => {
   const d = drag.value
-  if (!d || d.mode !== 'move' || !d.preview || d.overTray) return null
+  if (!d || d.mode !== 'move' || d.overTray) return null
   return {
-    colIndex: d.preview.colIndex,
     block: d.block,
     typeKey: typeKeyOf(d.block.type),
     isMove: d.block.type === '이동',
-    layout: { top: d.preview.rawTop, height: d.preview.height, cols: 1, colIndex: 0 },
+    layout: { top: 0, height: d.cloneH, cols: 1, colIndex: 0 },
+    style: {
+      left: `${d.pointerX - d.grabDX}px`,
+      top: `${d.pointerY - d.grabDY}px`,
+      width: `${d.cloneW}px`,
+      height: `${d.cloneH}px`,
+    },
   }
 })
 function onMove(ev) {
@@ -440,30 +455,6 @@ const previewLabel = computed(() => {
               </span>
             </div>
 
-            <!-- 떠다니는 클론(집어 든 블록) — 실제 카드 모양 그대로, 커서를 부드럽게 따라가며 들어올림. -->
-            <template v-if="dragClone && dragClone.colIndex === ci">
-              <div
-                v-if="dragClone.isMove"
-                class="pointer-events-none absolute left-1.5 right-2 z-50 flex items-center gap-1.5 overflow-hidden rounded-md border border-dashed border-[var(--brand)] px-2 py-px text-[11px] text-[var(--tag-gray-fg)] scale-[1.03] rotate-[-0.5deg] opacity-95 shadow-[0_16px_32px_rgba(20,22,26,0.26)]"
-                :style="{
-                  top: `${dragClone.layout.top}px`,
-                  height: `${dragClone.layout.height}px`,
-                  background:
-                    'repeating-linear-gradient(135deg, var(--tag-gray-bg) 0 6px, var(--background) 6px 12px)',
-                }"
-              >
-                <span aria-hidden="true">{{ typeEmojiOf(dragClone.block.type) }}</span>
-                <span class="truncate">{{ moveText(dragClone.block) }}</span>
-              </div>
-              <CalendarEvent
-                v-else
-                :block="dragClone.block"
-                :layout="dragClone.layout"
-                :type-key="dragClone.typeKey"
-                class="pointer-events-none z-50 scale-[1.03] rotate-[-0.5deg] opacity-95 !shadow-[0_16px_32px_rgba(20,22,26,0.26)]"
-              />
-            </template>
-
             <!-- 빈 컬럼 힌트 — 끌어다 놓기 안내. -->
             <div
               v-if="!d.events.length"
@@ -476,5 +467,37 @@ const previewLabel = computed(() => {
         </div>
       </div>
     </div>
+
+    <!-- 떠다니는 클론(집어 든 블록) — fixed 로 화면 기준, 커서를 X·Y 1:1 추종 + 들어올림. -->
+    <!-- Teleport 로 body 에 올려 그리드 overflow 클리핑·스택 영향 없이 자유롭게 따라간다. -->
+    <Teleport to="body">
+      <div
+        v-if="dragClone"
+        class="pointer-events-none fixed z-[100] will-change-transform"
+        :style="dragClone.style"
+      >
+        <div
+          v-if="dragClone.isMove"
+          class="absolute inset-0 flex items-center gap-1.5 overflow-hidden rounded-md border border-dashed border-[var(--brand)] px-2 py-px text-[11px] text-[var(--tag-gray-fg)] scale-[1.03] rotate-[-1.2deg] opacity-95 shadow-[0_18px_38px_rgba(20,22,26,0.30)]"
+          style="
+            background: repeating-linear-gradient(
+              135deg,
+              var(--tag-gray-bg) 0 6px,
+              var(--background) 6px 12px
+            );
+          "
+        >
+          <span aria-hidden="true">{{ typeEmojiOf(dragClone.block.type) }}</span>
+          <span class="truncate">{{ moveText(dragClone.block) }}</span>
+        </div>
+        <CalendarEvent
+          v-else
+          :block="dragClone.block"
+          :layout="dragClone.layout"
+          :type-key="dragClone.typeKey"
+          class="!left-0 !right-0 scale-[1.03] rotate-[-1.2deg] opacity-95 !shadow-[0_18px_38px_rgba(20,22,26,0.30)]"
+        />
+      </div>
+    </Teleport>
   </div>
 </template>
