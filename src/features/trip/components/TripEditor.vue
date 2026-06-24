@@ -2,7 +2,7 @@
 // TripEditor — 여행 계획 블록 에디터 최상위 (S6 협업 편집, 디자인시스템.md §6.2/§6.3).
 // 앱 셸 안에서 본문 캔버스만 그린다(사이드바·토픽바 없음).
 //   Z2 페이지 헤더: 커버 · 이모지 · 제목(인라인 편집) · 속성 테이블 + 협업 툴바(AvatarStack·동기화 배지).
-//   Z3 뷰 탭: 📅 일정 / 🖼️ 갤러리 / 🗺️ 지도 / 📋 보드.
+//   Z3 뷰 탭: 📅 일정 / 🖼️ 미디어 / 🗺️ 지도 / 📋 보드.
 //   일정 뷰: 보조 토글로 레일 ↔ 캘린더 전환.
 // 편집은 useTripEditor 로컬 낙관적 → updateTrip 전체 저장. 실시간(WS)은 mock stub.
 import { ref, reactive, computed, onMounted, watch } from 'vue'
@@ -469,7 +469,7 @@ function syncLabel() {
         />
       </template>
 
-      <!-- 🖼️ 갤러리 -->
+      <!-- 🖼️ 미디어 -->
       <template #gallery>
         <TripGalleryView
           :items="ed.items.value"
