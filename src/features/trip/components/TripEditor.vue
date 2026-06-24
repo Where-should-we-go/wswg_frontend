@@ -142,14 +142,42 @@ function onBoardDrop(dragId, date, targetId, pos) {
 
 // ── 미디어 업로드(E1) — 블록당 업로드 중 카운트로 스켈레톤 표시 ──
 const uploading = reactive({})
+// 업로드 실패/거부 사유를 사용자에게 알리는 모달.
+const uploadError = ref(null)
+// 사진·동영상만, 파일당 20MB 이하(백엔드 multipart 한도와 맞춤).
+const MAX_UPLOAD_BYTES = 20 * 1024 * 1024
+
+// 업로드 전 클라이언트 검증 — 통과하면 mediaType(PHOTO/VIDEO/AUDIO) 반환, 아니면 사유 문자열.
+function validateUpload(file) {
+  const isImage = file.type?.startsWith('image/')
+  const isVideo = file.type?.startsWith('video/')
+  const isAudio = file.type?.startsWith('audio/')
+  if (!isImage && !isVideo && !isAudio) {
+    return {
+      error: `'${file.name}'은(는) 지원하지 않는 형식이에요. 사진·동영상·음성만 올릴 수 있어요.`,
+    }
+  }
+  if (file.size > MAX_UPLOAD_BYTES) {
+    const mb = (file.size / (1024 * 1024)).toFixed(1)
+    return { error: `'${file.name}'은(는) 너무 커요(${mb}MB). 파일당 20MB 이하만 올릴 수 있어요.` }
+  }
+  return { mediaType: mediaTypeOf(file) }
+}
+
 async function onUploadMedia(blockId, files) {
   for (const file of files) {
+    const checked = validateUpload(file)
+    if (checked.error) {
+      uploadError.value = checked.error // 형식·용량 위반 → 모달
+      continue
+    }
     uploading[blockId] = (uploading[blockId] ?? 0) + 1
     const mediaType = mediaTypeOf(file)
     try {
       const res = await uploadMedia(ed.trip.value.trip_id, blockId, file)
       // mock 은 빈 url 을 주므로, 미리보기 objectURL 로 폴백(흐름·UI 동작 우선).
       const url = res?.mediaUrl || res?.url || URL.createObjectURL(file)
+      // id 로 중복 제거(실시간 broadcast 와 겹쳐도 1장).
       ed.addMedia(blockId, {
         id: res?.mediaId,
         type: res?.mediaType ?? mediaType,
@@ -157,8 +185,9 @@ async function onUploadMedia(blockId, files) {
         metadata: res?.metadata ?? {},
       })
       toast.success(`${mediaLabel(mediaType)}을(를) 더했어요`)
-    } catch {
-      toast.error('파일을 올리지 못했어요. 잠시 후 다시 시도해 주세요')
+    } catch (err) {
+      // 서버 사유(형식/용량/저장 실패 등)를 그대로 모달에 표시.
+      uploadError.value = err?.message || '파일을 올리지 못했어요. 잠시 후 다시 시도해 주세요.'
     } finally {
       uploading[blockId] = Math.max(0, (uploading[blockId] ?? 1) - 1)
       if (uploading[blockId] === 0) delete uploading[blockId]
@@ -286,6 +315,10 @@ function moveBlockDay(date) {
 function onSetRepresentative(blockId, mediaIndex) {
   ed.setRepresentative(blockId, mediaIndex)
   toast.success('대표 사진으로 선정했어요')
+}
+async function onDeleteMedia(blockId, mediaIndex) {
+  await ed.removeMedia(blockId, mediaIndex)
+  toast.success('사진을 삭제했어요')
 }
 
 // 모바일 블록 추가 바텀시트
@@ -436,7 +469,11 @@ function syncLabel() {
 
       <!-- 🖼️ 갤러리 -->
       <template #gallery>
-        <TripGalleryView :items="ed.items.value" @set-representative="onSetRepresentative" />
+        <TripGalleryView
+          :items="ed.items.value"
+          @set-representative="onSetRepresentative"
+          @delete-media="onDeleteMedia"
+        />
       </template>
 
       <!-- 🗺️ 지도 -->
@@ -631,6 +668,19 @@ function syncLabel() {
         <DialogFooter>
           <Button variant="ghost" @click="confirmDeleteOpen = false">취소</Button>
           <Button variant="destructive" @click="emit('delete')">삭제</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+
+    <!-- 업로드 실패/거부 안내 모달 -->
+    <Dialog :open="uploadError != null" @update:open="(v) => !v && (uploadError = null)">
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>사진·동영상을 올리지 못했어요</DialogTitle>
+        </DialogHeader>
+        <p class="text-[14px] text-[var(--ink-2)]">{{ uploadError }}</p>
+        <DialogFooter>
+          <Button @click="uploadError = null">확인</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

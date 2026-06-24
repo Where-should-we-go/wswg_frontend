@@ -13,6 +13,7 @@ import { GripVertical, Plus, MoreVertical, ImagePlus, Mic, Square } from '@lucid
 import { BlockTag } from '@/components/ui/block-tag'
 import { PropertyPill } from '@/components/ui/property-pill'
 import { CollabCaret } from '@/components/ui/collab-caret'
+import MediaLightbox from './MediaLightbox.vue'
 import {
   typeKeyOf,
   typeEmojiOf,
@@ -134,6 +135,8 @@ function onBlockDrop() {
 // ── 미디어 업로드(E1) ─────────────────────────────────────
 const fileInput = ref(null)
 const dropActive = ref(false)
+// 썸네일 클릭 → 확대(라이트박스). 갤러리와 동일 컴포넌트(MediaLightbox), 보기 전용.
+const previewMedia = ref(null)
 
 function pickFiles() {
   fileInput.value?.click()
@@ -147,6 +150,23 @@ function onDrop(e) {
   dropActive.value = false
   const files = [...(e.dataTransfer?.files ?? [])].filter(isSupportedMediaFile)
   if (files.length) emit('upload-media', props.block.id, files)
+}
+// 미디어 드롭존은 "파일" 드래그일 때만 가로챈다(stop). 블록 reorder 드래그면 막지 않아
+// 이벤트가 블록으로 버블 → 블록 하단(=after 영역)에서도 순서/시간 끌어넣기가 동작한다.
+function isFileDrag(e) {
+  return !!e.dataTransfer && Array.from(e.dataTransfer.types || []).includes('Files')
+}
+function onMediaDragOver(e) {
+  if (props.readonly || !isFileDrag(e)) return
+  e.preventDefault()
+  e.stopPropagation()
+  dropActive.value = true
+}
+function onMediaDrop(e) {
+  if (props.readonly || !isFileDrag(e)) return
+  e.preventDefault()
+  e.stopPropagation()
+  onDrop(e)
 }
 
 function isSupportedMediaFile(file) {
@@ -217,24 +237,6 @@ onBeforeUnmount(() => {
   if (recorder?.state === 'recording') recorder.stop()
   stopRecordStream()
 })
-
-// 미디어 드롭존은 "파일" 드래그일 때만 가로챈다(stop). 블록 reorder 드래그면 막지 않아
-// 이벤트가 블록으로 버블 → 블록 하단(=after 영역)에서도 순서/시간 끌어넣기가 동작한다.
-function isFileDrag(e) {
-  return !!e.dataTransfer && Array.from(e.dataTransfer.types || []).includes('Files')
-}
-function onMediaDragOver(e) {
-  if (props.readonly || !isFileDrag(e)) return
-  e.preventDefault()
-  e.stopPropagation()
-  dropActive.value = true
-}
-function onMediaDrop(e) {
-  if (props.readonly || !isFileDrag(e)) return
-  e.preventDefault()
-  e.stopPropagation()
-  onDrop(e)
-}
 </script>
 
 <template>
@@ -344,8 +346,10 @@ function onMediaDrop(e) {
         <div
           v-for="(m, i) in media"
           :key="i"
-          class="relative h-12 w-16 overflow-hidden rounded-[7px] border border-[var(--border)] bg-[linear-gradient(135deg,#cfe0f5,#e7d9c6)]"
-          :aria-label="mediaLabel(m)"
+          class="relative h-12 w-16 cursor-zoom-in overflow-hidden rounded-[7px] border border-[var(--border)] bg-[linear-gradient(135deg,#cfe0f5,#e7d9c6)]"
+          role="button"
+          :aria-label="`${mediaLabel(m)} 크게 보기`"
+          @click.stop="previewMedia = m"
         >
           <img
             v-if="m.url && m.type === 'PHOTO'"
@@ -426,5 +430,10 @@ function onMediaDrop(e) {
     >
       <MoreVertical class="size-4" />
     </button>
+
+    <!-- 썸네일 클릭 확대 — 갤러리와 동일 컴포넌트. 타임라인에선 보기 전용. -->
+    <Teleport to="body">
+      <MediaLightbox :media="previewMedia" :caption="block.title" @close="previewMedia = null" />
+    </Teleport>
   </div>
 </template>

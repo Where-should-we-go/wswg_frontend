@@ -125,8 +125,8 @@ function mediaTypeOf(file) {
 }
 
 // ── 미디어 업로드 (E1, S6) ───────────────────────────────────
-// POST /api/trips/{tripId}/items/{itemId}/media
-// multipart/form-data: file, mediaType
+// 미디어 업로드 — 백엔드: POST /api/trips/{tripId}/items/{itemId}/media (multipart: file, mediaType)
+// itemId = 블록 id (trips.data.items[].id). 형식·용량 검증은 호출부(onUploadMedia)에서 선반영.
 export async function uploadMedia(tripId, itemIdOrFormData, fileArg) {
   if (USE_MOCK) {
     await mockDelay(800)
@@ -142,7 +142,6 @@ export async function uploadMedia(tripId, itemIdOrFormData, fileArg) {
       },
     }
   }
-
   const itemId = itemIdOrFormData
   const formData = new FormData()
   formData.append('file', fileArg)

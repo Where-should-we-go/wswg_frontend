@@ -489,13 +489,28 @@ export function useTripEditor(initialTrip) {
   }
 
   // 미디어 append(E1 업로드). 업로드된 { type, url, metadata } 를 블록 media[] 끝에 더한다.
-  function addMedia(blockId, media) {
+  // persist=false: 로컬에만 반영(서버가 이미 저장한 경우). 미디어 업로드는 백엔드 업로드
+  // 엔드포인트가 trip.data 에 직접 저장하므로, FE 가 또 block.update 로 커밋하면 2장으로 중복된다.
+  function addMedia(blockId, media, persist = true) {
     const b = findBlock(blockId)
     if (!b) return
     if (!Array.isArray(b.media)) b.media = []
+    // 실시간(WS) 브로드캐스트로 같은 미디어가 먼저 들어올 수 있으므로 id 로 중복 제거.
+    if (media.id != null && b.media.some((m) => m.id === media.id)) return
     b.media.push(media)
-    // media 는 통째 교체 규약 → 현재 배열 전체를 patch.media 로 전송.
-    commitEdit('block.update', { id: blockId, patch: { media: b.media } }, blockId)
+    if (persist) {
+      // media 는 통째 교체 규약 → 현재 배열 전체를 patch.media 로 전송.
+      commitEdit('block.update', { id: blockId, patch: { media: b.media } }, blockId)
+    }
+  }
+
+  // 미디어 삭제 — 로컬에서 제거 후 전체 PUT(flush)으로 영속(미디어 삭제 전용 API 부재).
+  // OCI 객체 자체는 남는다(미참조). 서버 정리는 후속(삭제 엔드포인트) 과제.
+  async function removeMedia(blockId, mediaIndex) {
+    const b = findBlock(blockId)
+    if (!b || !Array.isArray(b.media) || mediaIndex < 0 || mediaIndex >= b.media.length) return
+    b.media.splice(mediaIndex, 1)
+    await flush()
   }
 
   // 대표 미디어 선정(갤러리). 한 블록의 한 미디어를 대표로 표시.
@@ -541,6 +556,7 @@ export function useTripEditor(initialTrip) {
     repackDay,
     reorderWithin,
     addMedia,
+    removeMedia,
     setRepresentative,
     setTitle,
   }

@@ -5,6 +5,7 @@
 import { ref, computed } from 'vue'
 import { Star } from '@lucide/vue'
 import EmptyState from '@/components/common/EmptyState.vue'
+import MediaLightbox from './MediaLightbox.vue'
 import { typeEmojiOf } from '@/features/trip/lib/blockMeta'
 
 const props = defineProps({
@@ -115,60 +116,13 @@ function selectRepresentative(p) {
       </button>
     </div>
 
-    <!-- 라이트박스 -->
-    <div
-      v-if="lightbox"
-      class="fixed inset-0 z-50 grid place-items-center bg-black/70 p-6"
-      role="dialog"
-      aria-label="사진 보기"
-      @click="closeLightbox"
-    >
-      <div
-        class="relative max-h-[80vh] w-full max-w-[720px] overflow-hidden rounded-[var(--radius-win)] bg-[linear-gradient(135deg,#cfe0f5,#e7d9c6)]"
-        @click.stop
-      >
-        <div class="grid aspect-video place-items-center">
-          <video
-            v-if="lightbox.isVideo && lightbox.media.url"
-            :src="lightbox.media.url"
-            controls
-            class="h-full w-full bg-black object-contain"
-          />
-          <audio
-            v-else-if="lightbox.media.type === 'AUDIO' && lightbox.media.url"
-            :src="lightbox.media.url"
-            controls
-            class="w-4/5"
-          />
-          <img
-            v-else-if="lightbox.media.type === 'PHOTO' && lightbox.media.url"
-            :src="lightbox.media.url"
-            alt=""
-            class="h-full w-full object-contain"
-          />
-          <span v-else-if="lightbox.isVideo" class="text-[48px] text-white" aria-hidden="true"
-            >▶</span
-          >
-          <span v-else class="text-[15px] font-medium text-white/90"
-            >{{ lightbox.emoji }} {{ lightbox.blockTitle }}</span
-          >
-        </div>
-        <button
-          type="button"
-          class="absolute right-3 top-3 grid size-8 place-items-center rounded-full bg-black/40 text-[16px] text-white"
-          aria-label="닫기"
-          @click="closeLightbox"
-        >
-          ✕
-        </button>
-        <button
-          type="button"
-          class="absolute bottom-3 left-3 inline-flex items-center gap-1.5 rounded-full bg-white px-3 py-1.5 text-[12.5px] font-semibold text-[var(--ink)]"
-          @click="selectRepresentative(lightbox)"
-        >
-          <Star class="size-3.5" /> 대표로 선정
-        </button>
-      </div>
-    </div>
+    <!-- 라이트박스 (갤러리·타임라인 공용 컴포넌트) -->
+    <MediaLightbox
+      :media="lightbox?.media ?? null"
+      :caption="lightbox?.blockTitle ?? ''"
+      can-set-representative
+      @close="closeLightbox"
+      @set-representative="selectRepresentative(lightbox)"
+    />
   </div>
 </template>
