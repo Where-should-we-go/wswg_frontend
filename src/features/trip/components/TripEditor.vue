@@ -74,9 +74,10 @@ function onDropOnDay(date) {
   draggingBlockId.value = null
   reorderHandled.value = false
 }
-// 같은 날 안에서 targetId 블록 위로 드롭 → 끄는 블록을 target 앞으로 + 순차 재패킹(시간 재계산).
-// 양방향: 시간 있는 블록 위에 놓으면 시간 부여(스케줄), 시간 미정 블록 위에 놓으면 시간 해제.
-function onReorderDrop(targetId) {
+// 같은 날 안에서 targetId 블록의 위/아래로 드롭 → 끄는 블록을 그 위치로 + 순차 재패킹(시간 재계산).
+// pos: 'before'(위) | 'after'(아래) — 마지막 블록 아래로 놓으면 맨 끝에 붙는다.
+// 양방향: 시간 있는 블록 옆에 놓으면 시간 부여(스케줄), 시간 미정 블록 옆에 놓으면 시간 해제.
+function onReorderDrop(targetId, pos = 'before') {
   const dragId = draggingBlockId.value
   if (!dragId || dragId === targetId) return
   const drag = ed.findBlock(dragId)
@@ -87,7 +88,8 @@ function onReorderDrop(targetId) {
   if (!day) return
   const ordered = day.blocks.map((b) => b.id).filter((id) => id !== dragId)
   const at = ordered.indexOf(targetId)
-  ordered.splice(at < 0 ? ordered.length : at, 0, dragId)
+  const insertAt = at < 0 ? ordered.length : pos === 'after' ? at + 1 : at
+  ordered.splice(insertAt, 0, dragId)
   ed.repackDay(drag.visitDate, ordered, { [dragId]: target.time != null })
 }
 

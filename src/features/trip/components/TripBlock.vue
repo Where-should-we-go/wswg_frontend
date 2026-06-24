@@ -100,8 +100,16 @@ function onCompositionEnd(e) {
 // ── 같은 날 순서 재배치(드래그핸들 ⋮⋮) ─────────────────────
 // 핸들에서 드래그 시작, 다른 블록 위로 드롭하면 그 블록 앞으로 재배치(reorder).
 const reorderOver = ref(false)
+// 드롭 위치: 포인터가 블록 상단 절반이면 'before'(위), 하단 절반이면 'after'(아래).
+const dropPos = ref('before')
 const rootEl = ref(null)
 const dragging = ref(false)
+function onDragOver(ev) {
+  if (props.readonly) return
+  reorderOver.value = true
+  const r = rootEl.value?.getBoundingClientRect()
+  if (r) dropPos.value = ev.clientY - r.top > r.height / 2 ? 'after' : 'before'
+}
 function onHandleDragStart(ev) {
   // 드래그 고스트를 작은 핸들이 아니라 블록 카드 전체로 잡는다(노션식 반투명 미리보기가 따라옴).
   // setDragImage 는 호출 시점의 렌더를 스냅샷 → opacity 흐리기는 이 뒤에 적용해 고스트엔 영향 없음.
@@ -119,7 +127,7 @@ function onHandleDragEnd() {
 }
 function onBlockDrop() {
   reorderOver.value = false
-  emit('reorder-drop', props.block.id)
+  emit('reorder-drop', props.block.id, dropPos.value)
 }
 
 // ── 미디어 업로드(E1) ─────────────────────────────────────
@@ -218,14 +226,15 @@ onBeforeUnmount(() => {
       editingByOther ? 'bg-[var(--selected-bg)]' : 'hover:bg-[var(--hover)]',
       dragging ? 'opacity-40' : '',
     ]"
-    @dragover.prevent="!readonly && (reorderOver = true)"
+    @dragover.prevent="onDragOver"
     @dragleave="reorderOver = false"
     @drop.prevent="!readonly && onBlockDrop()"
   >
-    <!-- 드롭 위치 삽입 라인(노션식) — 이 블록 바로 위로 들어온다. -->
+    <!-- 드롭 위치 삽입 라인(노션식) — 상단 절반=위, 하단 절반=아래. -->
     <span
       v-if="reorderOver && !dragging"
-      class="pointer-events-none absolute -top-px left-0 right-0 z-10 h-[2.5px] rounded-full bg-[var(--brand)]"
+      class="pointer-events-none absolute left-0 right-0 z-10 h-[2.5px] rounded-full bg-[var(--brand)]"
+      :class="dropPos === 'after' ? '-bottom-px' : '-top-px'"
       aria-hidden="true"
     />
     <!-- 레일 점(타입색) -->
