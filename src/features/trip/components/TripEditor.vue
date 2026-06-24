@@ -31,6 +31,7 @@ import TripBoardView from './TripBoardView.vue'
 import AttractionPickerDialog from './AttractionPickerDialog.vue'
 import { useTripEditor } from '@/features/trip/lib/useTripEditor'
 import { BLOCK_KINDS, typeEmojiOf } from '@/features/trip/lib/blockMeta'
+import { setTripTitleOverride } from '@/stores/tripUiState'
 
 const props = defineProps({
   trip: { type: Object, required: true },
@@ -44,13 +45,18 @@ const ed = useTripEditor(props.trip)
 
 // 여행 제목 라이브 입력 — 한글 IME 조합 중에는 커밋 보류(조합 끝나면 한 번에).
 const titleComposing = ref(false)
+function commitTitle(value) {
+  ed.setTitle(value)
+  // 사이드바 '내 여행' 목록은 별도 출처라 저장 왕복 전엔 안 바뀜 → 공유 override 로 즉시 반영.
+  setTripTitleOverride(ed.trip.value.trip_id, value)
+}
 function onTitleInput(e) {
   if (titleComposing.value) return
-  ed.setTitle(e.target.value)
+  commitTitle(e.target.value)
 }
 function onTitleCompositionEnd(e) {
   titleComposing.value = false
-  ed.setTitle(e.target.value)
+  commitTitle(e.target.value)
 }
 
 // 일정 뷰 보조 토글: 'rail' | 'calendar'

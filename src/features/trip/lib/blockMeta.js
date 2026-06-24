@@ -53,7 +53,7 @@ export const BLOCK_KINDS = [
   { typeKey: "memo", koType: "메모", emoji: "📝", title: "메모", desc: "자유 텍스트" },
 ];
 
-function formatBudget(won) {
+export function formatBudget(won) {
   return `${Number(won).toLocaleString("ko-KR")}원`;
 }
 

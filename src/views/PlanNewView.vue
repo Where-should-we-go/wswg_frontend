@@ -263,6 +263,8 @@ async function createPlan() {
       endDate: endDate.value,
       groupId: groupId.value,
       items,
+      region: regionLabel.value || undefined, // 패널 '지역'에 반영(문자열 라벨)
+      styles: styles.value, // 패널 '스타일'에 반영
     })
     const tripId = trip?.tripId
     if (tripId == null) {

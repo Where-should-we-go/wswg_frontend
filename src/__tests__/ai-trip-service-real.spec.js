@@ -61,6 +61,8 @@ describe('AI 추천 서비스 (실제 API 분기)', () => {
       endDate: '2026-07-03',
       groupId: 10,
       items,
+      region: '제주특별자치도',
+      styles: ['바다', '맛집'],
     })
     expect(apiPost).toHaveBeenCalledWith(
       '/api/trips',
@@ -69,7 +71,11 @@ describe('AI 추천 서비스 (실제 API 분기)', () => {
         startDate: '2026-07-01',
         endDate: '2026-07-03',
         groupId: 10,
-        data: expect.objectContaining({ items }),
+        // 지역·스타일이 data.meta 에 보존돼 속성 패널에 반영된다.
+        data: expect.objectContaining({
+          items,
+          meta: expect.objectContaining({ region: '제주특별자치도', styles: ['바다', '맛집'] }),
+        }),
       }),
     )
   })

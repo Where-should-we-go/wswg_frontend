@@ -209,7 +209,19 @@ export async function recommendRestaurants({ sessionId, selectedCandidateIds, da
 
 // ③ 조립한 일정으로 여행 생성. 일반 POST /api/trips (data.items) 로 사용자가 고른 장소를 그대로 저장.
 // 반환: TripDto(camelCase) — 화면은 tripId 로 /trips/{tripId} 이동.
-export async function createTripFromItinerary({ title, startDate, endDate, groupId, items }) {
-  const data = { items, meta: { icon: '✨' }, aiRecommendation: { createdAt: null } }
+export async function createTripFromItinerary({
+  title,
+  startDate,
+  endDate,
+  groupId,
+  items,
+  region,
+  styles,
+}) {
+  // 지역·스타일을 data.meta 에 보존 → 속성 패널(지역/스타일)에 그대로 반영(adaptTrip 이 읽음).
+  const meta = { icon: '✨' }
+  if (region) meta.region = region
+  if (styles && styles.length) meta.styles = styles
+  const data = { items, meta, aiRecommendation: { createdAt: null } }
   return createTrip({ title, startDate, endDate, groupId, data })
 }
