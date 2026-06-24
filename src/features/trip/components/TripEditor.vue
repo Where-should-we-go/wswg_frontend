@@ -453,6 +453,8 @@ function syncLabel() {
             @drop-on-day="onDropOnDay"
             @reorder-drop="onReorderDrop"
             @upload-media="onUploadMedia"
+            @delete-media="onDeleteMedia"
+            @set-representative="onSetRepresentative"
           />
         </template>
 

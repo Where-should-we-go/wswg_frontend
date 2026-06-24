@@ -504,13 +504,14 @@ export function useTripEditor(initialTrip) {
     }
   }
 
-  // 미디어 삭제 — 로컬에서 제거 후 전체 PUT(flush)으로 영속(미디어 삭제 전용 API 부재).
-  // OCI 객체 자체는 남는다(미참조). 서버 정리는 후속(삭제 엔드포인트) 과제.
-  async function removeMedia(blockId, mediaIndex) {
+  // 미디어 삭제 — 로컬 제거 후 media 배열 통째로 block.update op 전송(addMedia 와 동일 규약).
+  // raw PUT 만 하면 collab plan-state(Redis)에 미디어가 남아 flush 워커가 되살리므로 op 로 보낸다.
+  // 소켓 미연결이면 commitEdit 가 PUT(scheduleSave)로 폴백. OCI 객체 자체 정리는 후속 과제.
+  function removeMedia(blockId, mediaIndex) {
     const b = findBlock(blockId)
     if (!b || !Array.isArray(b.media) || mediaIndex < 0 || mediaIndex >= b.media.length) return
     b.media.splice(mediaIndex, 1)
-    await flush()
+    commitEdit('block.update', { id: blockId, patch: { media: b.media } }, blockId)
   }
 
   // 대표 미디어 선정(갤러리). 한 블록의 한 미디어를 대표로 표시.

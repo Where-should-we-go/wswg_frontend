@@ -37,6 +37,8 @@ const emit = defineEmits([
   'drop-on-day',
   'reorder-drop',
   'upload-media',
+  'delete-media',
+  'set-representative',
 ])
 
 const open = ref(true)
@@ -126,6 +128,8 @@ const grouped = computed(() => {
             @dragend="emit('block-dragend')"
             @reorder-drop="(id, pos) => emit('reorder-drop', id, pos)"
             @upload-media="(id, files) => emit('upload-media', id, files)"
+            @delete-media="(id, idx) => emit('delete-media', id, idx)"
+            @set-representative="(id, idx) => emit('set-representative', id, idx)"
           />
         </template>
       </template>

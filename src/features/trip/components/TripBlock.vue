@@ -41,6 +41,8 @@ const emit = defineEmits([
   'dragend',
   'reorder-drop',
   'upload-media',
+  'delete-media',
+  'set-representative',
 ])
 
 const typeKey = computed(() => typeKeyOf(props.block.type))
@@ -135,8 +137,17 @@ function onBlockDrop() {
 // ── 미디어 업로드(E1) ─────────────────────────────────────
 const fileInput = ref(null)
 const dropActive = ref(false)
-// 썸네일 클릭 → 확대(라이트박스). 갤러리와 동일 컴포넌트(MediaLightbox), 보기 전용.
+// 썸네일 클릭 → 확대(라이트박스). 갤러리와 동일 컴포넌트(MediaLightbox).
 const previewMedia = ref(null)
+function deletePreview() {
+  const idx = media.value.indexOf(previewMedia.value)
+  if (idx !== -1) emit('delete-media', props.block.id, idx)
+  previewMedia.value = null // 삭제된 미디어이므로 라이트박스 닫기
+}
+function setRepresentativePreview() {
+  const idx = media.value.indexOf(previewMedia.value)
+  if (idx !== -1) emit('set-representative', props.block.id, idx)
+}
 
 function pickFiles() {
   fileInput.value?.click()
@@ -431,9 +442,17 @@ onBeforeUnmount(() => {
       <MoreVertical class="size-4" />
     </button>
 
-    <!-- 썸네일 클릭 확대 — 갤러리와 동일 컴포넌트. 타임라인에선 보기 전용. -->
+    <!-- 썸네일 클릭 확대 — 갤러리와 동일 컴포넌트. 편집 가능하면 삭제도 노출. -->
     <Teleport to="body">
-      <MediaLightbox :media="previewMedia" :caption="block.title" @close="previewMedia = null" />
+      <MediaLightbox
+        :media="previewMedia"
+        :caption="block.title"
+        :can-delete="!readonly"
+        :can-set-representative="!readonly"
+        @close="previewMedia = null"
+        @delete="deletePreview"
+        @set-representative="setRepresentativePreview"
+      />
     </Teleport>
   </div>
 </template>

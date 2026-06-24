@@ -13,7 +13,7 @@ const props = defineProps({
   items: { type: Array, default: () => [] },
 })
 
-const emit = defineEmits(['set-representative'])
+const emit = defineEmits(['set-representative', 'delete-media'])
 
 // 모든 media 를 { blockId, blockTitle, mediaIndex, media, emoji } 로 평탄화.
 const photos = computed(() => {
@@ -44,6 +44,12 @@ function closeLightbox() {
 
 function selectRepresentative(p) {
   emit('set-representative', p.blockId, p.mediaIndex)
+}
+
+function deleteFromLightbox(p) {
+  if (!p) return
+  emit('delete-media', p.blockId, p.mediaIndex)
+  closeLightbox() // 삭제된 미디어이므로 라이트박스 닫기
 }
 </script>
 
@@ -121,8 +127,10 @@ function selectRepresentative(p) {
       :media="lightbox?.media ?? null"
       :caption="lightbox?.blockTitle ?? ''"
       can-set-representative
+      can-delete
       @close="closeLightbox"
       @set-representative="selectRepresentative(lightbox)"
+      @delete="deleteFromLightbox(lightbox)"
     />
   </div>
 </template>
