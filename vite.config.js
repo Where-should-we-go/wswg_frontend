@@ -20,6 +20,8 @@ export default defineConfig({
       '/auth': 'http://localhost:8080',
       '/oauth2': 'http://localhost:8080',
       '/login/oauth2': 'http://localhost:8080',
+      // 실시간 공동편집 WebSocket — ws:true 로 업그레이드를 백엔드로 터널링.
+      '/ws': { target: 'ws://localhost:8080', ws: true },
     },
   },
 })

@@ -8,7 +8,7 @@
 //   업로드 중 스켈레톤 썸네일 표시, 완료되면 media[] 에 append.
 // 프레즌스: editor 있으면 옅은 배경(편집 중 표시) + CollabCaret.
 // ui/ 프리미티브 + blockMeta 헬퍼만 조합. 색은 토큰만.
-import { computed, ref, nextTick } from 'vue'
+import { computed, ref, watch, onMounted } from 'vue'
 import { GripVertical, Plus, MoreVertical, ImagePlus } from '@lucide/vue'
 import { BlockTag } from '@/components/ui/block-tag'
 import { PropertyPill } from '@/components/ui/property-pill'
@@ -57,22 +57,33 @@ const overline = computed(() =>
   overlineOf({ time: props.block.time, durationMin: props.block.durationMin }),
 )
 
-// ── 제목 인라인 편집 ───────────────────────────────────────
-const editing = ref(false)
-const draft = ref('')
+// ── 제목 라이브 인라인 편집(노션식) ───────────────────────
+// 모드 전환 없이 항상 제자리 편집. 키 입력마다 즉시 반영하되, 한글 IME 조합 중에는
+// 커밋하지 않는다(조합이 끝난 뒤 한 번). uncontrolled input 으로 커서 위치를 보존하고,
+// 원격(다른 참가자) 변경은 내가 편집 중이 아닐 때만 DOM 에 반영한다.
 const inputEl = ref(null)
+const composing = ref(false)
 
-async function startEdit() {
-  if (props.readonly) return
-  draft.value = props.block.title
-  editing.value = true
-  await nextTick()
-  inputEl.value?.focus()
+onMounted(() => {
+  if (inputEl.value) inputEl.value.value = props.block.title ?? ''
+})
+
+watch(
+  () => props.block.title,
+  (title) => {
+    const el = inputEl.value
+    if (!el || document.activeElement === el) return // 내가 타이핑 중이면 건드리지 않음
+    if (el.value !== (title ?? '')) el.value = title ?? ''
+  },
+)
+
+function onTitleInput(e) {
+  if (composing.value) return // 한글 조합 중엔 커밋 보류
+  emit('edit-title', props.block.id, e.target.value)
 }
-function commitEdit() {
-  if (!editing.value) return
-  editing.value = false
-  if (draft.value !== props.block.title) emit('edit-title', props.block.id, draft.value)
+function onCompositionEnd(e) {
+  composing.value = false
+  emit('edit-title', props.block.id, e.target.value)
 }
 
 // ── 같은 날 순서 재배치(드래그핸들 ⋮⋮) ─────────────────────
@@ -163,27 +174,22 @@ function onDrop(e) {
         {{ overline }}
       </div>
 
-      <!-- 제목 (인라인 편집) -->
-      <div class="text-[15.5px] font-medium leading-[1.4]">
+      <!-- 제목 (노션식 라이브 인라인 편집 — 항상 제자리 편집, 모드 전환 없음) -->
+      <div class="flex items-center text-[15.5px] font-medium leading-[1.4]">
         <input
-          v-if="editing"
           ref="inputEl"
-          v-model="draft"
           type="text"
-          class="w-full rounded-sm border border-[var(--brand)] bg-[var(--background)] px-1 py-0.5 text-[15.5px] font-medium outline-none"
+          :readonly="readonly || editingByOther"
           placeholder="제목을 적어 주세요"
-          @blur="commitEdit"
-          @keydown.enter.prevent="commitEdit"
-          @keydown.esc="editing = false"
+          class="min-w-0 flex-1 bg-transparent px-1 py-0.5 text-[15.5px] font-medium outline-none placeholder:text-[var(--ink-3)]"
+          :class="readonly || editingByOther ? 'cursor-default' : 'cursor-text'"
+          @input="onTitleInput"
+          @compositionstart="composing = true"
+          @compositionend="onCompositionEnd"
+          @keydown.enter.prevent="inputEl?.blur()"
+          @click.stop
         />
-        <template v-else>
-          <span
-            :class="readonly ? '' : 'cursor-text rounded-sm hover:bg-[var(--hover)]'"
-            @click="startEdit"
-            >{{ block.title || '제목을 적어 주세요' }}</span
-          >
-          <CollabCaret v-if="editingByOther" :name="editor.name" :color="editor.color" />
-        </template>
+        <CollabCaret v-if="editingByOther" :name="editor.name" :color="editor.color" />
       </div>
 
       <!-- 타입 태그 · region · 속성 pill · 직접추가 -->

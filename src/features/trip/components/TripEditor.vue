@@ -8,6 +8,7 @@
 import { ref, reactive, computed } from 'vue'
 import { toast } from 'vue-sonner'
 import { uploadMedia } from '@/services/trips'
+import { getAttraction } from '@/services/attractions'
 import { AvatarStack } from '@/components/ui/avatar-stack'
 import { LiveIndicator } from '@/components/ui/live-indicator'
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet'
@@ -21,6 +22,7 @@ import TripCalendar from './TripCalendar.vue'
 import TripGalleryView from './TripGalleryView.vue'
 import TripMapView from './TripMapView.vue'
 import TripBoardView from './TripBoardView.vue'
+import AttractionPickerDialog from './AttractionPickerDialog.vue'
 import { useTripEditor } from '@/features/trip/lib/useTripEditor'
 import { BLOCK_KINDS, typeEmojiOf } from '@/features/trip/lib/blockMeta'
 
@@ -33,6 +35,17 @@ const props = defineProps({
 const emit = defineEmits(['delete'])
 
 const ed = useTripEditor(props.trip)
+
+// 여행 제목 라이브 입력 — 한글 IME 조합 중에는 커밋 보류(조합 끝나면 한 번에).
+const titleComposing = ref(false)
+function onTitleInput(e) {
+  if (titleComposing.value) return
+  ed.setTitle(e.target.value)
+}
+function onTitleCompositionEnd(e) {
+  titleComposing.value = false
+  ed.setTitle(e.target.value)
+}
 
 // 일정 뷰 보조 토글: 'rail' | 'calendar'
 const scheduleMode = ref('rail')
@@ -95,14 +108,42 @@ async function onUploadMedia(blockId, files) {
   }
 }
 
-// 블록 추가(슬래시/+ 행). 추가 후 토스트.
+// 블록 추가(슬래시/+ 행). "관광지"는 검색 다이얼로그로, 나머지는 빈 블록 즉시 추가.
 function onAddBlock(koType, date) {
+  if (koType === '관광') {
+    placePickerDate.value = date
+    placePickerOpen.value = true
+    return
+  }
   ed.addBlock(koType, date)
   toast.success('블록을 더했어요')
 }
+// + 버튼(블록 아래 추가)은 같은 타입의 빈 블록을 바로 — 검색 다이얼로그를 열지 않는다.
 function onAddAfter(id) {
   const b = ed.findBlock(id)
-  if (b) onAddBlock(b.type, b.visitDate)
+  if (b) {
+    ed.addBlock(b.type, b.visitDate)
+    toast.success('블록을 더했어요')
+  }
+}
+
+// 관광지 검색 다이얼로그
+const placePickerOpen = ref(false)
+const placePickerDate = ref(null)
+async function onPickPlace(place) {
+  // TourAPI 장소는 검색 요약에 좌표·주소가 없어 상세를 조회해 보강(지도 표시용).
+  // 직접 추가(content_id null)는 상세가 없으므로 그대로 추가.
+  let full = place
+  if (place.contentId != null) {
+    try {
+      const detail = await getAttraction(place.contentId)
+      if (detail) full = { ...place, ...detail }
+    } catch {
+      full = place
+    }
+  }
+  ed.addPlaceBlock(full, placePickerDate.value)
+  toast.success(`'${place.title}'을(를) 더했어요`)
 }
 
 // 블록 메뉴(⋮): 데스크탑·모바일 공용 시트. 시간·속성 인라인 편집도 여기서.
@@ -193,6 +234,7 @@ const confirmDeleteOpen = ref(false)
 function syncLabel() {
   if (ed.syncState.value === 'saving') return '저장 중…'
   if (ed.syncState.value === 'error') return '저장 실패 · 다시 시도'
+  if (ed.realtimeEnabled && ed.realtimeReady.value) return '실시간 연결됨'
   return '실시간 동기화'
 }
 </script>
@@ -226,13 +268,15 @@ function syncLabel() {
     <!-- 페이지 아이콘 -->
     <div class="-mt-[52px] mb-2 pl-1 text-[46px] leading-none">{{ ed.trip.value.icon }}</div>
 
-    <!-- 타이틀(인라인 편집) -->
+    <!-- 타이틀(라이브 인라인 편집 — 한글 IME 조합 가드) -->
     <input
       :value="ed.trip.value.title"
       type="text"
       class="mt-[18px] mb-3.5 w-full bg-transparent text-[30px] font-extrabold tracking-[-0.03em] outline-none sm:text-[38px]"
       placeholder="여행 제목"
-      @input="ed.setTitle($event.target.value)"
+      @input="onTitleInput"
+      @compositionstart="titleComposing = true"
+      @compositionend="onTitleCompositionEnd"
     />
 
     <!-- 속성 테이블 -->
@@ -291,7 +335,7 @@ function syncLabel() {
             :blocks="d.blocks"
             :editors="ed.editorsByBlock.value"
             :uploading="uploading"
-            @edit-title="(id, t) => ed.patchBlock(id, { title: t })"
+            @edit-title="(id, t) => ed.patchBlockLive(id, { title: t })"
             @add-block="onAddBlock"
             @add-after="onAddAfter"
             @open-menu="openMenu"
@@ -478,6 +522,9 @@ function syncLabel() {
         </div>
       </SheetContent>
     </Sheet>
+
+    <!-- 관광지 검색해서 추가 -->
+    <AttractionPickerDialog v-model:open="placePickerOpen" :date="placePickerDate" @pick="onPickPlace" />
 
     <!-- 여행 삭제 확인 -->
     <Dialog v-model:open="confirmDeleteOpen">
