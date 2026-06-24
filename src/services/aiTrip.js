@@ -19,6 +19,23 @@ export const RESTAURANT_CONTENT_TYPE_ID = 39
 // trip-recommendations limit 상한(백엔드 MAX_LIMIT).
 const MAX_LIMIT = 30
 
+// AI 호출은 외부 LLM(GMS) 의 일시적 실패로 가끔 502(AI_TRIP_CANDIDATE_FAILED / EMBEDDING_REQUEST_FAILED)
+// 가 난다. 흐름 첫 단계가 한 번 삐끗하면 전체가 죽으므로 짧게 재시도해 견고하게 만든다.
+async function withRetry(fn, { retries = 2, delayMs = 700 } = {}) {
+  let lastErr
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      return await fn()
+    } catch (err) {
+      lastErr = err
+      if (attempt < retries) {
+        await new Promise((resolve) => setTimeout(resolve, delayMs * (attempt + 1)))
+      }
+    }
+  }
+  throw lastErr
+}
+
 // 폼 입력(지역·기간·인원·스타일·자유서술)을 자연어 한 문장으로 합성 → 후보 생성 message.
 // 자유서술(note)이 있으면 뒤에 그대로 덧붙인다(사용자 의도 우선).
 export function buildTripMessage({
@@ -47,7 +64,7 @@ export async function createTripCandidates({ message, count = 8 }) {
     await mockDelay(1200) // "후보를 고르고 있어요…" 체감용.
     return db.makeAiCandidates(message, count)
   }
-  return apiPost('/api/ai/trip-candidates', { message, count })
+  return withRetry(() => apiPost('/api/ai/trip-candidates', { message, count }))
 }
 
 // ② 선택 후보 기반 추천. POST /api/ai/trip-recommendations
@@ -66,15 +83,17 @@ export async function recommendTrip({
     await mockDelay(900)
     return db.makeAiRecommendations(sessionId, selectedCandidateIds, limit, contentTypeId)
   }
-  return apiPost('/api/ai/trip-recommendations', {
-    sessionId,
-    selectedCandidateIds,
-    contentTypeId,
-    latitude,
-    longitude,
-    radiusMeters,
-    limit,
-  })
+  return withRetry(() =>
+    apiPost('/api/ai/trip-recommendations', {
+      sessionId,
+      selectedCandidateIds,
+      contentTypeId,
+      latitude,
+      longitude,
+      radiusMeters,
+      limit,
+    }),
+  )
 }
 
 // startDate~endDate(포함) "YYYY-MM-DD" 배열. 한 쪽만 있으면 그 하루.

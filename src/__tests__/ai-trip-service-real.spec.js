@@ -44,6 +44,15 @@ describe('AI 추천 서비스 (실제 API 분기)', () => {
     expect(body.limit).toBe(6) // 3일 × 2끼(점심·저녁)
   })
 
+  it('AI 후보 호출은 일시적 실패 시 재시도한다', async () => {
+    apiPost
+      .mockRejectedValueOnce(new Error('AI 여행 후보 생성에 실패했습니다.'))
+      .mockResolvedValueOnce({ sessionId: 's', candidates: [] })
+    const res = await createTripCandidates({ message: 'x', count: 4 })
+    expect(apiPost).toHaveBeenCalledTimes(2) // 1회 실패 후 재시도 성공
+    expect(res.sessionId).toBe('s')
+  })
+
   it('여행 생성 → POST /api/trips (조립한 data.items 그대로 저장)', async () => {
     const items = [{ id: 'ai-1', contentId: 1, title: 'A', type: '관광', order: 1 }]
     await createTripFromItinerary({
