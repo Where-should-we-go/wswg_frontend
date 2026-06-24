@@ -478,7 +478,7 @@ const previewLabel = computed(() => {
       >
         <div
           v-if="dragClone.isMove"
-          class="absolute inset-0 flex items-center gap-1.5 overflow-hidden rounded-md border border-dashed border-[var(--brand)] px-2 py-px text-[11px] text-[var(--tag-gray-fg)] scale-[1.03] rotate-[-1.2deg] opacity-95 shadow-[0_18px_38px_rgba(20,22,26,0.30)]"
+          class="absolute inset-0 flex items-center gap-1.5 overflow-hidden rounded-md border border-dashed border-[var(--brand)] px-2 py-px text-[11px] text-[var(--tag-gray-fg)] opacity-[0.55] shadow-[0_6px_16px_rgba(20,22,26,0.14)]"
           style="
             background: repeating-linear-gradient(
               135deg,
@@ -495,7 +495,7 @@ const previewLabel = computed(() => {
           :block="dragClone.block"
           :layout="dragClone.layout"
           :type-key="dragClone.typeKey"
-          class="!left-0 !right-0 scale-[1.03] rotate-[-1.2deg] opacity-95 !shadow-[0_18px_38px_rgba(20,22,26,0.30)]"
+          class="!left-0 !right-0 opacity-[0.55] !shadow-[0_6px_16px_rgba(20,22,26,0.14)]"
         />
       </div>
     </Teleport>
