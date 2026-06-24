@@ -14,6 +14,9 @@ export default defineConfig({
     },
   },
   server: {
+    // host:true → 0.0.0.0 바인딩. 같은 LAN의 다른 PC가 http://<호스트-IP>:3000 으로 접속 가능.
+    // 프록시는 dev 서버(호스트 PC)에서 돌므로 target 은 localhost:8080 그대로 둔다.
+    host: true,
     port: 3000,
     proxy: {
       '/api': 'http://localhost:8080',

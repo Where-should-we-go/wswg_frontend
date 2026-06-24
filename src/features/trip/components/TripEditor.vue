@@ -12,7 +12,13 @@ import { getAttraction } from '@/services/attractions'
 import { AvatarStack } from '@/components/ui/avatar-stack'
 import { LiveIndicator } from '@/components/ui/live-indicator'
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet'
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import EmptyState from '@/components/common/EmptyState.vue'
 import TripPropertyTable from './TripPropertyTable.vue'
@@ -63,11 +69,13 @@ function onBlockDragEnd() {
   reorderHandled.value = false
 }
 function onDropOnDay(date) {
-  if (draggingBlockId.value && !reorderHandled.value) ed.moveBlockToDate(draggingBlockId.value, date)
+  if (draggingBlockId.value && !reorderHandled.value)
+    ed.moveBlockToDate(draggingBlockId.value, date)
   draggingBlockId.value = null
   reorderHandled.value = false
 }
-// 같은 날 안에서 targetId 블록 위로 드롭 → 끄는 블록을 target 앞으로 재배치.
+// 같은 날 안에서 targetId 블록 위로 드롭 → 끄는 블록을 target 앞으로 + 순차 재패킹(시간 재계산).
+// 양방향: 시간 있는 블록 위에 놓으면 시간 부여(스케줄), 시간 미정 블록 위에 놓으면 시간 해제.
 function onReorderDrop(targetId) {
   const dragId = draggingBlockId.value
   if (!dragId || dragId === targetId) return
@@ -80,7 +88,7 @@ function onReorderDrop(targetId) {
   const ordered = day.blocks.map((b) => b.id).filter((id) => id !== dragId)
   const at = ordered.indexOf(targetId)
   ordered.splice(at < 0 ? ordered.length : at, 0, dragId)
-  ed.reorderWithin(drag.visitDate, ordered)
+  ed.repackDay(drag.visitDate, ordered, { [dragId]: target.time != null })
 }
 
 // ── 미디어 업로드(E1) — 블록당 업로드 중 카운트로 스켈레톤 표시 ──
@@ -97,7 +105,11 @@ async function onUploadMedia(blockId, files) {
       const res = await uploadMedia(ed.trip.value.trip_id, fd)
       // mock 은 빈 url 을 주므로, 미리보기 objectURL 로 폴백(흐름·UI 동작 우선).
       const url = res?.url || URL.createObjectURL(file)
-      ed.addMedia(blockId, { type: res?.mediaType ?? mediaType, url, metadata: res?.metadata ?? {} })
+      ed.addMedia(blockId, {
+        type: res?.mediaType ?? mediaType,
+        url,
+        metadata: res?.metadata ?? {},
+      })
       toast.success('추억이 더해졌어요')
     } catch {
       toast.error('사진을 올리지 못했어요. 잠시 후 다시 시도해 주세요')
@@ -182,7 +194,11 @@ function commitDuration() {
 function commitBudget() {
   if (!menuBlock.value) return
   const n = Number(form.budget)
-  ed.patchProperty(menuBlock.value.id, 'budget', form.budget === '' || Number.isNaN(n) || n <= 0 ? '' : n)
+  ed.patchProperty(
+    menuBlock.value.id,
+    'budget',
+    form.budget === '' || Number.isNaN(n) || n <= 0 ? '' : n,
+  )
 }
 // 평점(0~5) 저장. 빈/범위밖 → 키 제거.
 function commitRating() {
@@ -240,7 +256,9 @@ function syncLabel() {
 </script>
 
 <template>
-  <article class="relative mx-auto max-w-[820px] px-5 pt-[26px] pb-24 sm:px-10 lg:px-14 lg:pt-[30px]">
+  <article
+    class="relative mx-auto max-w-[820px] px-5 pt-[26px] pb-24 sm:px-10 lg:px-14 lg:pt-[30px]"
+  >
     <!-- 협업 툴바 (우상단): 동행 아바타 · 동기화 배지 -->
     <div class="mb-3 flex items-center justify-end gap-3">
       <AvatarStack :members="ed.trip.value.members" />
@@ -347,11 +365,14 @@ function syncLabel() {
           />
         </template>
 
-        <!-- 캘린더(시간 그리드) -->
+        <!-- 캘린더(시간 그리드) — 드래그로 일정 조율 + 블록 추가 -->
         <TripCalendar
           v-else
           :items="ed.items.value"
           :start-date="ed.trip.value.start_date"
+          @change="(id, patch) => ed.setBlockSchedule(id, patch)"
+          @add-block="onAddBlock"
+          @edit-title="(id, t) => ed.patchBlockLive(id, { title: t })"
         />
       </template>
 
@@ -362,12 +383,21 @@ function syncLabel() {
 
       <!-- 🗺️ 지도 -->
       <template #map>
-        <TripMapView :items="ed.items.value" />
+        <TripMapView
+          :items="ed.items.value"
+          :default-date="ed.days.value[0]?.date ?? null"
+          @add-block="onAddBlock"
+        />
       </template>
 
       <!-- 📋 보드(칸반) -->
       <template #board>
-        <TripBoardView :days="ed.days.value" @move-block="ed.moveBlockToDate" />
+        <TripBoardView
+          :days="ed.days.value"
+          @move-block="ed.moveBlockToDate"
+          @add-block="onAddBlock"
+          @edit-title="(id, t) => ed.patchBlockLive(id, { title: t })"
+        />
       </template>
     </TripViewTabs>
 
@@ -511,9 +541,10 @@ function syncLabel() {
             class="flex items-center gap-2.5 rounded-[var(--radius)] border border-[var(--border)] p-3 text-left hover:bg-[var(--hover)]"
             @click="addFromSheet(kind.koType)"
           >
-            <span class="grid size-9 place-items-center rounded-md bg-[var(--sunken)] text-[18px]">{{
-              kind.emoji
-            }}</span>
+            <span
+              class="grid size-9 place-items-center rounded-md bg-[var(--sunken)] text-[18px]"
+              >{{ kind.emoji }}</span
+            >
             <span class="min-w-0">
               <span class="block text-[13.5px] font-semibold">{{ kind.title }}</span>
               <span class="block truncate text-[11px] text-[var(--ink-3)]">{{ kind.desc }}</span>
@@ -524,7 +555,11 @@ function syncLabel() {
     </Sheet>
 
     <!-- 관광지 검색해서 추가 -->
-    <AttractionPickerDialog v-model:open="placePickerOpen" :date="placePickerDate" @pick="onPickPlace" />
+    <AttractionPickerDialog
+      v-model:open="placePickerOpen"
+      :date="placePickerDate"
+      @pick="onPickPlace"
+    />
 
     <!-- 여행 삭제 확인 -->
     <Dialog v-model:open="confirmDeleteOpen">

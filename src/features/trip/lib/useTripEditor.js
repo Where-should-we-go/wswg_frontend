@@ -7,6 +7,7 @@
 import { ref, computed, onMounted, onBeforeUnmount, getCurrentInstance } from 'vue'
 import { updateTrip } from '@/services/trips'
 import { typeKeyOf } from '@/features/trip/lib/blockMeta'
+import { timeToMinutes, packSchedule } from '@/features/trip/lib/calendar'
 import { USE_MOCK } from '@/services/config'
 import * as authService from '@/services/auth'
 import { createPlanSocket, userIdFromToken } from '@/features/trip/lib/planSocket'
@@ -27,6 +28,17 @@ function blankBlock(koType, visitDate, order) {
     media: [],
     properties: {},
   }
+}
+
+// 타임라인 정렬: 시간 있는 블록은 시각 오름차순(같으면 order), 시간 미정은 맨 뒤에서 order 순.
+// 일정은 시간 순서로 보여야 하므로, 시간 있는 블록끼리는 수동 order 가 아니라 time 으로 정렬한다.
+function compareForTimeline(a, b) {
+  const ta = a.time
+  const tb = b.time
+  if (ta && tb) return ta < tb ? -1 : ta > tb ? 1 : (a.order ?? 0) - (b.order ?? 0)
+  if (ta) return -1 // 시간 있는 블록을 시간 미정보다 앞에
+  if (tb) return 1
+  return (a.order ?? 0) - (b.order ?? 0) // 둘 다 시간 미정 → 수동 order
 }
 
 // TourAPI contentTypeId → 블록 한글 타입. 음식점=39, 숙박=32, 그 외는 관광.
@@ -79,7 +91,8 @@ export function useTripEditor(initialTrip) {
 
   const items = computed(() => trip.value?.data?.items ?? [])
 
-  // visitDate 별 그룹 [{ date, dayIndex, blocks }] (order 정렬).
+  // visitDate 별 그룹 [{ date, dayIndex, blocks }].
+  // 시간 있는 블록은 시각 오름차순(일정은 시간 순서로 보여야 함), 시간 미정은 맨 뒤 수동 order 순.
   const days = computed(() => {
     const map = new Map()
     // 여행 기간 전체 날짜를 우선 채워 빈 Day 도 보이게 한다.
@@ -95,7 +108,7 @@ export function useTripEditor(initialTrip) {
       .map(([date, blocks], i) => ({
         date,
         dayIndex: i + 1,
-        blocks: [...blocks].sort((a, b) => (a.order ?? 0) - (b.order ?? 0)),
+        blocks: [...blocks].sort(compareForTimeline),
       }))
   })
 
@@ -377,6 +390,70 @@ export function useTripEditor(initialTrip) {
     commitEdit('block.update', { id, patch: { visitDate: newDate, order: b.order } }, id)
   }
 
+  // 캘린더 드래그로 일정 조율 — time·소요시간·일차를 한 번에 변경(block.update 1건).
+  // 일차가 바뀌면 새 날 끝으로 order 도 같이 옮긴다(레일 뷰 정렬 일관성).
+  function setBlockSchedule(id, patch) {
+    const b = findBlock(id)
+    if (!b) return
+    const next = {}
+    if ('time' in patch) next.time = patch.time
+    if ('durationMin' in patch) next.durationMin = patch.durationMin
+    if (patch.visitDate && patch.visitDate !== b.visitDate) {
+      next.visitDate = patch.visitDate
+      const sameDay = items.value.filter((x) => x.visitDate === patch.visitDate)
+      next.order = sameDay.reduce((m, x) => Math.max(m, x.order ?? 0), 0) + 1
+    }
+    if (Object.keys(next).length === 0) return
+    Object.assign(b, next)
+    commitEdit('block.update', { id, patch: next }, id)
+  }
+
+  // WS op(있으면) / PUT 폴백 — 프레즌스 없이 조용히 보냄(재패킹은 블록 여럿 갱신).
+  function pushUpdate(id, patch) {
+    if (!sendOp('block.update', { id, patch })) scheduleSave()
+  }
+
+  // 순차 재패킹 — 순서(orderedIds)대로 시간 있는 블록을 겹침 없이 이어 배치하고,
+  // 시간 미정 블록은 맨 뒤 수동 order 로 둔다. overrides[id]=true/false 로 시간 부여/해제(양방향).
+  //   앵커 = 그 날의 가장 이른 기존 시각(없으면 09:00) → 하루 시작 시각은 유지.
+  function repackDay(date, orderedIds, overrides = {}) {
+    const blocks = orderedIds.map((id) => findBlock(id)).filter((b) => b && b.visitDate === date)
+    const timed = []
+    const untimed = []
+    for (const b of blocks) {
+      const isTimed = b.id in overrides ? overrides[b.id] : b.time != null
+      ;(isTimed ? timed : untimed).push(b)
+    }
+    let anchorMin = null
+    for (const b of timed) {
+      const t = timeToMinutes(b.time)
+      if (t != null) anchorMin = anchorMin == null ? t : Math.min(anchorMin, t)
+    }
+    if (anchorMin == null) anchorMin = 9 * 60
+    const timeById = Object.fromEntries(
+      packSchedule(timed, { anchorMin }).map((p) => [p.id, p.time]),
+    )
+    for (const b of timed) {
+      const nt = timeById[b.id]
+      if (b.time !== nt) {
+        b.time = nt
+        pushUpdate(b.id, { time: nt })
+      }
+    }
+    untimed.forEach((b, i) => {
+      const patch = {}
+      if (b.time != null) {
+        b.time = null
+        patch.time = null
+      }
+      if ((b.order ?? 0) !== i + 1) {
+        b.order = i + 1
+        patch.order = i + 1
+      }
+      if (Object.keys(patch).length) pushUpdate(b.id, patch)
+    })
+  }
+
   // 같은 날 안에서 순서 재배치(롱프레스/드래그). orderedIds = 새 순서의 블록 id[].
   function reorderWithin(date, orderedIds) {
     let sent = false
@@ -439,6 +516,8 @@ export function useTripEditor(initialTrip) {
     addPlaceBlock,
     removeBlock,
     moveBlockToDate,
+    setBlockSchedule,
+    repackDay,
     reorderWithin,
     addMedia,
     setRepresentative,
