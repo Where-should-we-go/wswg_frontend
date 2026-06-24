@@ -1,9 +1,9 @@
 <script setup>
 // S5 여행 자동 생성 (/plans/new) — 담당 A5.
-// backend #56 AI 후보 선택 흐름을 한 화면 3단계로 연결한다.
-//   form      : 지역·기간·인원·스타일·자유서술 → 자연어 message 합성 → 후보 생성
-//   candidates: AI 후보 카드 다중 선택 → 선택 후보로 실제 관광지 추천
-//   preview   : 추천 관광지 확인 + 제목/기간 → 여행 생성 → /trips/{tripId} 이동
+// backend #56 추천 기반 흐름을 한 화면 2단계로 연결한다.
+//   form   : 지역·기간·인원·스타일·자유서술 → 자연어 합성 → (자동) 후보 생성·전체선택 → 실제 관광지 추천
+//   select : 추천 관광지(실데이터) 다중선택 → 여행 만들기
+//            (선택 관광지 + 일자별 식당 3끼 조립 → /api/trips 저장 → /trips/{tripId} 이동)
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Sparkles, Check } from '@lucide/vue'
@@ -17,7 +17,10 @@ import {
   buildTripMessage,
   createTripCandidates,
   recommendTrip,
-  createAiTripPlan,
+  recommendRestaurants,
+  buildItinerary,
+  createTripFromItinerary,
+  RESTAURANT_CONTENT_TYPE_ID,
 } from '@/services/aiTrip'
 import { getGroups } from '@/services/groups'
 import StyleChipGroup from '@/features/plan/StyleChipGroup.vue'
@@ -66,18 +69,19 @@ const loadingText = ref('일정을 짜고 있어요…')
 const emptyResult = ref(false)
 const forbidden = ref(false)
 
-// ── 다단계 상태 (form → candidates → preview) ────────────────
+// ── 2단계 상태 (form → select) ───────────────────────────────
 const step = ref('form')
 const sessionId = ref(null)
+// 추천을 끌어내려고 후보를 전부 자동선택한다(사용자에겐 후보 단계를 노출하지 않음).
+const allCandidateIds = ref([])
 const aiReply = ref('')
-const candidates = ref([])
-const selectedIds = ref([])
+// 선택 가능한 실제 관광지 추천(식당 제외).
 const recommendations = ref([])
-// preview 에서 사용자가 다듬을 수 있는 제목(진입 시 기본값 주입).
-const planTitle = ref('')
+// 사용자가 고른 추천 contentId 집합.
+const selectedRecIds = ref([])
 
-const canRecommend = computed(() => selectedIds.value.length >= 1 && !generating.value)
-// 후보·기간이 있으면 제목 기본값을 만든다(없으면 백엔드 기본값으로 대체됨).
+const canCreate = computed(() => selectedRecIds.value.length >= 1 && !generating.value)
+// 여행 제목 기본값(지역+기간). 없으면 일반 기본값.
 const defaultTitle = computed(() => {
   if (regionLabel.value && nightCount.value > 0) {
     return `${regionLabel.value} ${nightCount.value}박 ${dayCount.value}일`
@@ -175,11 +179,11 @@ const canGenerate = computed(
     !generating.value,
 )
 
-// ── ① 폼 → 후보 생성 ─────────────────────────────────────────
+// ── ① 폼 → (자동) 후보 생성·전체선택 → 실제 관광지 추천 → 선택 단계 ──
 async function generate() {
   if (!canGenerate.value) return
   generating.value = true
-  loadingText.value = '취향에 맞는 후보를 고르고 있어요…'
+  loadingText.value = '실제 관광지를 찾고 있어요…'
   emptyResult.value = false
   forbidden.value = false
   try {
@@ -191,50 +195,32 @@ async function generate() {
       styles: styles.value,
       note: note.value,
     })
-    const res = await createTripCandidates({ message, count: 8 })
-    // 후보 0건 → 이동하지 않고 화면 잔류(입력 보존) + EmptyState.
-    if (!res?.candidates?.length) {
+    const cand = await createTripCandidates({ message, count: 8 })
+    if (!cand?.candidates?.length) {
       emptyResult.value = true
       return
     }
-    sessionId.value = res.sessionId
-    aiReply.value = res.reply ?? ''
-    candidates.value = res.candidates
-    selectedIds.value = []
-    step.value = 'candidates'
-  } catch {
-    toast.error('후보를 만들다가 문제가 생겼어요. 잠시 후 다시 시도해 주세요.')
-  } finally {
-    generating.value = false
-  }
-}
+    sessionId.value = cand.sessionId
+    aiReply.value = cand.reply ?? ''
+    // 후보를 전부 자동선택해 추천 풀을 넓게 가져온다.
+    allCandidateIds.value = cand.candidates.map((c) => c.candidateId)
 
-// 후보 카드 다중 선택 토글.
-function toggleCandidate(id) {
-  const i = selectedIds.value.indexOf(id)
-  if (i === -1) selectedIds.value.push(id)
-  else selectedIds.value.splice(i, 1)
-}
-
-// ── ② 선택 후보 → 추천 ───────────────────────────────────────
-async function recommend() {
-  if (!canRecommend.value) return
-  generating.value = true
-  loadingText.value = '실제 관광지를 찾고 있어요…'
-  emptyResult.value = false
-  try {
-    const res = await recommendTrip({
+    const rec = await recommendTrip({
       sessionId: sessionId.value,
-      selectedCandidateIds: selectedIds.value,
-      limit: 10,
+      selectedCandidateIds: allCandidateIds.value,
+      limit: 20,
     })
-    if (!res?.recommendations?.length) {
+    // 식당(음식점)은 일정 생성 시 자동 추가하므로 선택 목록에선 제외(볼거리만 고르게).
+    const places = (rec?.recommendations ?? []).filter(
+      (r) => r.contentTypeId !== RESTAURANT_CONTENT_TYPE_ID,
+    )
+    if (places.length === 0) {
       emptyResult.value = true
       return
     }
-    recommendations.value = res.recommendations
-    planTitle.value = defaultTitle.value
-    step.value = 'preview'
+    recommendations.value = places
+    selectedRecIds.value = []
+    step.value = 'select'
   } catch {
     toast.error('추천을 불러오다가 문제가 생겼어요. 잠시 후 다시 시도해 주세요.')
   } finally {
@@ -242,21 +228,41 @@ async function recommend() {
   }
 }
 
-// ── ③ 추천 → 여행 생성 ───────────────────────────────────────
+// 추천 카드 다중 선택 토글(contentId 기준).
+function toggleRec(contentId) {
+  const i = selectedRecIds.value.indexOf(contentId)
+  if (i === -1) selectedRecIds.value.push(contentId)
+  else selectedRecIds.value.splice(i, 1)
+}
+
+// ── ② 선택 추천 + 식당 → 일정 조립 → 여행 생성 ───────────────
 async function createPlan() {
-  if (generating.value) return
+  if (!canCreate.value) return
   generating.value = true
-  loadingText.value = '여행 계획을 만들고 있어요…'
+  loadingText.value = '식당까지 더해 일정을 짜고 있어요…'
   forbidden.value = false
   try {
-    const trip = await createAiTripPlan({
-      title: planTitle.value.trim() || undefined,
+    const attractions = recommendations.value.filter((r) =>
+      selectedRecIds.value.includes(r.contentId),
+    )
+    // 일수×3 끼니만큼 식당을 추천받아 자동 배치.
+    const restaurants = await recommendRestaurants({
+      sessionId: sessionId.value,
+      selectedCandidateIds: allCandidateIds.value,
+      days: dayCount.value,
+    })
+    const items = buildItinerary({
+      attractions,
+      restaurants,
+      startDate: startDate.value,
+      endDate: endDate.value,
+    })
+    const trip = await createTripFromItinerary({
+      title: defaultTitle.value,
       startDate: startDate.value,
       endDate: endDate.value,
       groupId: groupId.value,
-      sessionId: sessionId.value,
-      selectedCandidateIds: selectedIds.value,
-      limit: 6,
+      items,
     })
     const tripId = trip?.tripId
     if (tripId == null) {
@@ -277,13 +283,10 @@ async function createPlan() {
   }
 }
 
-// 단계 뒤로 가기.
+// 폼으로 돌아가기.
 function backToForm() {
   step.value = 'form'
   emptyResult.value = false
-}
-function backToCandidates() {
-  step.value = 'candidates'
 }
 
 // 403 안내에서 개인 여행으로 전환(groupId 비우기).
@@ -418,39 +421,45 @@ function cancel() {
       </div>
     </div>
 
-    <!-- STEP 2: AI 후보 카드(다중 선택) -->
-    <div v-else-if="step === 'candidates'" class="flex flex-col gap-4">
+    <!-- STEP 2: 실제 추천 관광지 다중선택 → 바로 여행 만들기 -->
+    <div v-else-if="step === 'select'" class="flex flex-col gap-4">
       <div
         class="rounded-[var(--radius-win)] border border-[var(--border)] bg-[var(--card)] p-5 shadow-[var(--shadow-win)] sm:p-7"
       >
-        <h2 class="text-sm font-semibold text-[var(--ink)]">마음에 드는 곳을 골라주세요</h2>
-        <p v-if="aiReply" class="mt-1 text-sm text-[var(--ink-2)]">{{ aiReply }}</p>
+        <h2 class="text-sm font-semibold text-[var(--ink)]">어디를 둘러볼까요?</h2>
+        <p class="mt-1 text-sm text-[var(--ink-2)]">
+          {{ aiReply || '취향에 맞는 실제 관광지를 골라봤어요.' }} 고른 곳에 더해, 하루 세 끼
+          식당은 일정에 자동으로 넣어드려요.
+        </p>
 
         <ul class="mt-4 grid grid-cols-1 gap-2.5 sm:grid-cols-2">
-          <li v-for="c in candidates" :key="c.candidateId">
+          <li v-for="r in recommendations" :key="r.contentId">
             <button
               type="button"
               class="flex w-full flex-col gap-1 rounded-[var(--radius-win)] border p-3.5 text-left transition-colors"
               :class="
-                selectedIds.includes(c.candidateId)
+                selectedRecIds.includes(r.contentId)
                   ? 'border-[var(--brand)] bg-[var(--brand)]/5'
                   : 'border-[var(--border)] hover:border-[var(--ink-3)]'
               "
-              :aria-pressed="selectedIds.includes(c.candidateId)"
-              @click="toggleCandidate(c.candidateId)"
+              :aria-pressed="selectedRecIds.includes(r.contentId)"
+              @click="toggleRec(r.contentId)"
             >
               <span class="flex items-center justify-between gap-2">
-                <span class="font-semibold text-[var(--ink)]">{{ c.name }}</span>
+                <span class="truncate font-semibold text-[var(--ink)]">{{ r.title }}</span>
                 <Check
-                  v-if="selectedIds.includes(c.candidateId)"
+                  v-if="selectedRecIds.includes(r.contentId)"
                   class="size-4 shrink-0 text-[var(--brand)]"
                 />
               </span>
-              <span v-if="c.regionHint" class="text-xs text-[var(--ink-3)]">{{ c.regionHint }}</span>
-              <span v-if="c.description" class="mt-0.5 text-xs text-[var(--ink-2)]">{{
-                c.description
-              }}</span>
-              <span v-if="c.reason" class="mt-1 text-xs text-[var(--brand)]">{{ c.reason }}</span>
+              <span v-if="r.sidoName" class="text-xs text-[var(--ink-3)]"
+                >{{ r.sidoName }} {{ r.gugunName }}</span
+              >
+              <span
+                v-if="r.similarity != null"
+                class="mt-0.5 text-xs text-[var(--brand)]"
+                >매칭 {{ Math.round(r.similarity * 100) }}%</span
+              >
             </button>
           </li>
         </ul>
@@ -458,56 +467,11 @@ function cancel() {
 
       <div class="flex items-center justify-between gap-2">
         <Button type="button" variant="ghost" @click="backToForm">← 조건 다시 고르기</Button>
-        <Button type="button" :disabled="!canRecommend" @click="recommend">
+        <Button type="button" :disabled="!canCreate" @click="createPlan">
           <Sparkles class="size-4" />
-          {{ selectedIds.length > 0 ? `${selectedIds.length}곳으로 추천 받기` : '추천 받기' }}
-        </Button>
-      </div>
-    </div>
-
-    <!-- STEP 3: 추천 관광지 프리뷰 + 제목/기간 확인 -->
-    <div v-else-if="step === 'preview'" class="flex flex-col gap-4">
-      <div
-        class="rounded-[var(--radius-win)] border border-[var(--border)] bg-[var(--card)] p-5 shadow-[var(--shadow-win)] sm:p-7"
-      >
-        <h2 class="text-sm font-semibold text-[var(--ink)]">이 관광지들로 일정을 만들까요?</h2>
-        <p class="mt-1 text-sm text-[var(--ink-2)]">
-          선택한 취향에 맞춰 실제 관광 데이터에서 골랐어요.
-        </p>
-
-        <div class="mt-4">
-          <label class="mb-1 block text-xs text-[var(--ink-3)]">여행 제목</label>
-          <Input v-model="planTitle" :placeholder="defaultTitle" />
-        </div>
-
-        <ul class="mt-4 flex flex-col gap-2">
-          <li
-            v-for="(r, i) in recommendations"
-            :key="r.contentId"
-            class="flex items-center justify-between gap-3 rounded-[var(--radius-win)] border border-[var(--border)] px-3.5 py-2.5"
-          >
-            <span class="flex min-w-0 items-center gap-2.5">
-              <span
-                class="grid size-6 shrink-0 place-items-center rounded-full bg-[var(--brand)]/10 text-xs font-semibold text-[var(--brand)]"
-                >{{ i + 1 }}</span
-              >
-              <span class="truncate font-medium text-[var(--ink)]">{{ r.title }}</span>
-            </span>
-            <span
-              v-if="r.similarity != null"
-              class="shrink-0 text-xs text-[var(--ink-3)]"
-              :title="`유사도 ${Math.round(r.similarity * 100)}%`"
-              >매칭 {{ Math.round(r.similarity * 100) }}%</span
-            >
-          </li>
-        </ul>
-      </div>
-
-      <div class="flex items-center justify-between gap-2">
-        <Button type="button" variant="ghost" @click="backToCandidates">← 후보 다시 고르기</Button>
-        <Button type="button" :disabled="generating" @click="createPlan">
-          <Sparkles class="size-4" />
-          이 일정으로 여행 만들기
+          {{
+            selectedRecIds.length > 0 ? `${selectedRecIds.length}곳으로 여행 만들기` : '여행 만들기'
+          }}
         </Button>
       </div>
     </div>

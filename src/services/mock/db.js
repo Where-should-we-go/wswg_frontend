@@ -401,7 +401,6 @@ export const REGION_MEDIA = {
 // ③ 추천 → trips.data.items 로 여행 생성. 목에선 ATTRACTIONS 풀로 흉내낸다.
 const aiSessions = {} // sessionId -> { message, candidates(내부용 _contentId 포함) }
 let aiSessionSeq = 0
-let aiTripSeq = 900 // trips.js mockTripSeq(100~)과 겹치지 않게 높게 시작.
 
 // ① 후보 생성. ATTRACTIONS 앞에서 count 개를 후보처럼 변환.
 export function makeAiCandidates(message, count = 8) {
@@ -424,101 +423,50 @@ export function makeAiCandidates(message, count = 8) {
   }
 }
 
-// 선택 후보 → 실제 관광지 추천 목록(내부 헬퍼). 후보 1개당 추천 1개.
-function aiRecommendList(sessionId, selectedIds = [], limit = 10) {
-  const sess = aiSessions[sessionId]
-  const picked = (sess?.candidates ?? []).filter((c) => selectedIds.includes(c.candidateId))
-  return picked.slice(0, limit).map((c, i) => ({
-    contentId: c._contentId,
-    title: c.name,
-    similarity: Number((0.92 - i * 0.03).toFixed(2)),
+// 관광지 → 추천(backend AiTripRecommendationDto 모양: 좌표·지역·타입 포함).
+function recFromAttraction(a, i, matchedCandidate) {
+  return {
+    contentId: a.contentId,
+    title: a.title,
+    contentTypeId: a.contentTypeId ?? null,
+    sidoCode: a.sidoCode ?? null,
+    sidoName: a.sidoName ?? null,
+    gugunCode: a.gugunCode ?? null,
+    gugunName: a.gugunName ?? null,
+    firstImage1: a.firstImage1 ?? '',
+    latitude: a.mapY ?? null,
+    longitude: a.mapX ?? null,
+    addr1: a.addr1 ?? '',
     distanceMeters: null,
+    similarity: Number((0.92 - i * 0.03).toFixed(2)),
     score: Number((0.86 - i * 0.03).toFixed(2)),
-    matchedCandidateId: c.candidateId,
-    matchedCandidateName: c.name,
-  }))
+    matchedCandidateId: matchedCandidate?.candidateId ?? null,
+    matchedCandidateName: matchedCandidate?.name ?? null,
+  }
 }
 
-// ② 선택 후보 기반 추천.
-export function makeAiRecommendations(sessionId, selectedIds = [], limit = 10) {
+// 선택 후보 → 실제 관광지 추천 목록(내부 헬퍼).
+// contentTypeId 가 있으면 해당 타입 풀(예: 음식점)에서, 없으면 후보 1개당 1건.
+function aiRecommendList(sessionId, selectedIds = [], limit = 10, contentTypeId = null) {
+  if (contentTypeId != null) {
+    let pool = ATTRACTIONS.filter((a) => a.contentTypeId === contentTypeId)
+    if (pool.length === 0) pool = ATTRACTIONS // mock 풀에 해당 타입이 없으면 아무거나(끼니 채움용).
+    return pool.slice(0, limit).map((a, i) => recFromAttraction(a, i, null))
+  }
+  const sess = aiSessions[sessionId]
+  const picked = (sess?.candidates ?? []).filter((c) => selectedIds.includes(c.candidateId))
+  return picked.slice(0, limit).map((c, i) => {
+    const a = ATTRACTIONS.find((x) => x.contentId === c._contentId) ?? {}
+    return recFromAttraction({ ...a, title: c.name }, i, c)
+  })
+}
+
+// ② 선택 후보 기반 추천. contentTypeId 로 타입(음식점 등) 필터 가능.
+export function makeAiRecommendations(sessionId, selectedIds = [], limit = 10, contentTypeId = null) {
   return {
     sessionId,
     reply: '선택한 취향과 가까운 실제 관광지를 정리했어요.',
-    recommendations: aiRecommendList(sessionId, selectedIds, limit),
+    recommendations: aiRecommendList(sessionId, selectedIds, limit, contentTypeId),
     nextQuestion: '이대로 여행 계획을 만들까요?',
-  }
-}
-
-// ③ 추천 → 여행 생성. TRIPS 에 적재하고 backend TripDto(camelCase) 형태로 반환.
-export function makeAiTripPlan({
-  title,
-  startDate,
-  endDate,
-  groupId,
-  sessionId,
-  selectedCandidateIds = [],
-  limit = 6,
-}) {
-  const recs = aiRecommendList(sessionId, selectedCandidateIds, limit)
-  const items = recs.map((r, i) => {
-    const a = ATTRACTIONS.find((x) => x.contentId === r.contentId)
-    return {
-      id: `ai-place-${i + 1}`,
-      content_id: r.contentId,
-      contentId: r.contentId,
-      title: r.title,
-      type: a?.contentTypeId === 39 ? '식당' : '관광',
-      contentTypeId: a?.contentTypeId ?? null,
-      sidoCode: a?.sidoCode ?? null,
-      sidoName: a?.sidoName ?? null,
-      gugunCode: a?.gugunCode ?? null,
-      gugunName: a?.gugunName ?? null,
-      lat: a?.mapY ?? null,
-      lng: a?.mapX ?? null,
-      visitDate: startDate ?? null,
-      order: i + 1,
-      media: [],
-      properties: {
-        source: 'AI_RECOMMENDATION',
-        score: r.score,
-        similarity: r.similarity,
-        matchedCandidateId: r.matchedCandidateId,
-        matchedCandidateName: r.matchedCandidateName,
-        region: a ? `${a.sidoName} ${a.gugunName}` : undefined,
-      },
-    }
-  })
-  const tripId = ++aiTripSeq
-  const data = {
-    items,
-    meta: { icon: '✨' },
-    aiRecommendation: { sessionId, selectedCandidateIds, createdAt: null },
-  }
-  // S6 에디터가 getTrip(tripId) 으로 읽을 수 있게 TRIPS 에 적재(표현용 shape).
-  TRIPS[tripId] = {
-    trip_id: tripId,
-    title: title || 'AI 추천 여행 계획',
-    group_id: groupId ?? null,
-    user_id: CURRENT_USER.id,
-    start_date: startDate ?? null,
-    end_date: endDate ?? null,
-    cover: null,
-    icon: '✨',
-    region: null,
-    budgetLabel: '',
-    styles: [],
-    members: [{ id: 'u1', name: '태호', initial: '태', color: 'var(--collab-1)' }],
-    presence: [],
-    data,
-  }
-  // 실제 API 와 동일하게 TripDto(camelCase) 반환.
-  return {
-    tripId,
-    title: title || 'AI 추천 여행 계획',
-    startDate: startDate ?? null,
-    endDate: endDate ?? null,
-    groupId: groupId ?? null,
-    userId: CURRENT_USER.id,
-    data,
   }
 }

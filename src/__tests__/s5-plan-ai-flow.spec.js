@@ -2,46 +2,46 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import PlanNewView from '@/views/PlanNewView.vue'
 
-// 라우터 스텁.
 const push = vi.fn()
 vi.mock('vue-router', () => ({
   useRouter: () => ({ push, back: vi.fn() }),
   useRoute: () => ({ query: {} }),
 }))
-
-// 옵션 로드 즉시 resolve.
 vi.mock('@/services/attractions', () => ({
-  getSidos: vi.fn(async () => [{ sidoCode: 1, sidoName: '서울' }]),
+  getSidos: vi.fn(async () => [{ sidoCode: 50, sidoName: '제주특별자치도' }]),
   getGuguns: vi.fn(async () => []),
 }))
-vi.mock('@/services/groups', () => ({
-  getGroups: vi.fn(async () => []),
-}))
+vi.mock('@/services/groups', () => ({ getGroups: vi.fn(async () => []) }))
 
-// AI 3단계 서비스 모킹(순수 헬퍼 buildTripMessage 는 실제 사용).
+// AI 서비스 모킹(buildItinerary·상수는 실제 사용).
 const createTripCandidates = vi.fn(async () => ({
   sessionId: 's1',
-  reply: '후보를 골라봤어요.',
+  reply: '제주 후보를 골라봤어요.',
   candidates: [
-    { candidateId: 'c1', name: '경복궁', regionHint: '서울 종로구', reason: '추천 이유' },
-    { candidateId: 'c2', name: '북촌한옥마을', regionHint: '서울 종로구' },
+    { candidateId: 'c1', name: '성산일출봉' },
+    { candidateId: 'c2', name: '우도' },
   ],
-  nextQuestion: '',
 }))
 const recommendTrip = vi.fn(async () => ({
-  sessionId: 's1',
-  reply: '실제 관광지를 정리했어요.',
-  recommendations: [{ contentId: 126508, title: '경복궁', similarity: 0.91, score: 0.83 }],
-  nextQuestion: '',
+  recommendations: [
+    { contentId: 101, title: '성산일출봉', contentTypeId: 12, sidoName: '제주특별자치도', gugunName: '서귀포시', latitude: 33.4, longitude: 126.9, similarity: 0.91 },
+    { contentId: 102, title: '우도', contentTypeId: 12, sidoName: '제주특별자치도', gugunName: '제주시', latitude: 33.5, longitude: 126.9, similarity: 0.86 },
+  ],
 }))
-const createAiTripPlan = vi.fn(async () => ({ tripId: 777, title: '서울 1박 2일' }))
+const recommendRestaurants = vi.fn(async () => [
+  { contentId: 201, title: '제주식당1', contentTypeId: 39, sidoName: '제주특별자치도', gugunName: '제주시', latitude: 33.5, longitude: 126.5 },
+  { contentId: 202, title: '제주식당2', contentTypeId: 39, sidoName: '제주특별자치도', gugunName: '제주시', latitude: 33.5, longitude: 126.5 },
+  { contentId: 203, title: '제주식당3', contentTypeId: 39, sidoName: '제주특별자치도', gugunName: '제주시', latitude: 33.5, longitude: 126.5 },
+])
+const createTripFromItinerary = vi.fn(async () => ({ tripId: 777 }))
 vi.mock('@/services/aiTrip', async (importOriginal) => {
   const actual = await importOriginal()
   return {
-    ...actual,
+    ...actual, // buildItinerary, dayList, RESTAURANT_CONTENT_TYPE_ID 는 실제.
     createTripCandidates: (...a) => createTripCandidates(...a),
     recommendTrip: (...a) => recommendTrip(...a),
-    createAiTripPlan: (...a) => createAiTripPlan(...a),
+    recommendRestaurants: (...a) => recommendRestaurants(...a),
+    createTripFromItinerary: (...a) => createTripFromItinerary(...a),
   }
 })
 
@@ -49,9 +49,8 @@ function mountView() {
   return mount(PlanNewView, { global: { stubs: { 'router-link': true } } })
 }
 
-// 폼 필수값(지역·기간·스타일) 채우기.
 async function fillForm(wrapper) {
-  await wrapper.find('select').setValue(1)
+  await wrapper.find('select').setValue(50)
   const dates = wrapper.findAll('input[type="date"]')
   await dates[0].setValue('2026-07-01')
   await dates[1].setValue('2026-07-02')
@@ -59,69 +58,75 @@ async function fillForm(wrapper) {
   await styleBtn.trigger('click')
 }
 
-describe('S5 AI 후보 선택 3단계 흐름', () => {
+describe('S5 AI 추천 2단계 흐름 (form → select → create)', () => {
   beforeEach(() => {
     createTripCandidates.mockClear()
     recommendTrip.mockClear()
-    createAiTripPlan.mockClear()
+    recommendRestaurants.mockClear()
+    createTripFromItinerary.mockClear()
     push.mockClear()
   })
 
-  it('폼 → 후보 → 프리뷰 → 여행 생성까지 이어진다', async () => {
+  it('폼 제출 시 후보 자동생성·전체선택 후 실제 추천을 선택 화면에 보여준다', async () => {
     const wrapper = mountView()
     await flushPromises()
     await fillForm(wrapper)
-
-    // ① 후보 생성
     await wrapper
       .findAll('button')
       .find((b) => b.text().includes('자동 생성'))
       .trigger('click')
     await flushPromises()
+
     expect(createTripCandidates).toHaveBeenCalledTimes(1)
-    expect(wrapper.text()).toContain('마음에 드는 곳을 골라주세요')
-    expect(wrapper.text()).toContain('경복궁')
-
-    // 후보 선택 전엔 추천 버튼 비활성
-    const recBtnBefore = wrapper.findAll('button').find((b) => b.text().includes('추천 받기'))
-    expect(recBtnBefore.attributes('disabled')).toBeDefined()
-
-    // 후보 1개 선택
-    await wrapper
-      .findAll('button')
-      .find((b) => b.text().includes('경복궁'))
-      .trigger('click')
-
-    // ② 추천
-    await wrapper
-      .findAll('button')
-      .find((b) => b.text().includes('추천 받기'))
-      .trigger('click')
-    await flushPromises()
+    // 후보 전체(c1,c2)를 자동선택해 추천을 가져온다.
     expect(recommendTrip).toHaveBeenCalledTimes(1)
     expect(recommendTrip.mock.calls[0][0]).toMatchObject({
       sessionId: 's1',
-      selectedCandidateIds: ['c1'],
+      selectedCandidateIds: ['c1', 'c2'],
     })
-    expect(wrapper.text()).toContain('이 관광지들로 일정을 만들까요?')
+    expect(wrapper.text()).toContain('어디를 둘러볼까요?')
+    expect(wrapper.text()).toContain('성산일출봉')
+  })
 
-    // ③ 여행 생성 → /trips/777 이동
+  it('추천 선택 후 여행 만들기 → 식당 추가·일정 조립·생성·이동', async () => {
+    const wrapper = mountView()
+    await flushPromises()
+    await fillForm(wrapper)
+    await wrapper
+      .findAll('button')
+      .find((b) => b.text().includes('자동 생성'))
+      .trigger('click')
+    await flushPromises()
+
+    // 선택 전엔 생성 버튼 비활성
+    const createBtnBefore = wrapper.findAll('button').find((b) => b.text().includes('여행 만들기'))
+    expect(createBtnBefore.attributes('disabled')).toBeDefined()
+
+    // 추천 1곳 선택
+    await wrapper
+      .findAll('button')
+      .find((b) => b.text().includes('성산일출봉'))
+      .trigger('click')
+
     await wrapper
       .findAll('button')
       .find((b) => b.text().includes('여행 만들기'))
       .trigger('click')
     await flushPromises()
-    expect(createAiTripPlan).toHaveBeenCalledTimes(1)
-    expect(createAiTripPlan.mock.calls[0][0]).toMatchObject({
-      sessionId: 's1',
-      selectedCandidateIds: ['c1'],
-      startDate: '2026-07-01',
-      endDate: '2026-07-02',
-    })
+
+    // 식당 추천(일수×3)과 여행 생성이 호출된다.
+    expect(recommendRestaurants).toHaveBeenCalledTimes(1)
+    expect(recommendRestaurants.mock.calls[0][0]).toMatchObject({ sessionId: 's1', days: 2 })
+    expect(createTripFromItinerary).toHaveBeenCalledTimes(1)
+    const arg = createTripFromItinerary.mock.calls[0][0]
+    // 선택 관광지(1) + 식당(최대 6) 이 일정 items 로 조립된다.
+    expect(arg.items.length).toBeGreaterThan(1)
+    expect(arg.items.some((it) => it.type === '식당')).toBe(true)
+    expect(arg.items.some((it) => it.type === '관광')).toBe(true)
     expect(push).toHaveBeenCalledWith('/trips/777')
   })
 
-  it('후보 단계에서 조건 다시 고르기로 폼으로 돌아간다', async () => {
+  it('조건 다시 고르기로 폼으로 돌아간다', async () => {
     const wrapper = mountView()
     await flushPromises()
     await fillForm(wrapper)
@@ -130,7 +135,7 @@ describe('S5 AI 후보 선택 3단계 흐름', () => {
       .find((b) => b.text().includes('자동 생성'))
       .trigger('click')
     await flushPromises()
-    expect(wrapper.text()).toContain('마음에 드는 곳을 골라주세요')
+    expect(wrapper.text()).toContain('어디를 둘러볼까요?')
 
     await wrapper
       .findAll('button')

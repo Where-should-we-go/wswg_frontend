@@ -83,12 +83,16 @@ export async function deleteTrip(tripId) {
   return apiDelete(`/api/trips/${tripId}`)
 }
 
-// ── 수동 생성 (D1, 빈 문서) ──────────────────────────────────
-// body: { title, startDate, endDate, groupId? }
+// ── 생성 (D1 빈 문서 / AI 조립 일정) ─────────────────────────
+// body: { title, startDate, endDate, groupId?, data? }
+// data 를 주면 그 items 를 그대로 담는다(AI 추천 일정 조립). 없으면 빈 문서.
 export async function createTrip(body) {
   if (USE_MOCK) {
     await mockDelay()
     const tripId = ++mockTripSeq
+    const data =
+      body.data && typeof body.data === 'object' ? body.data : { items: [] }
+    if (!Array.isArray(data.items)) data.items = []
     db.TRIPS[tripId] = {
       trip_id: tripId,
       title: body.title ?? '새 여행',
@@ -97,13 +101,13 @@ export async function createTrip(body) {
       start_date: body.startDate ?? null,
       end_date: body.endDate ?? null,
       cover: null,
-      icon: '🗺️',
+      icon: data.meta?.icon ?? '🗺️',
       region: null,
       budgetLabel: '',
       styles: [],
       members: [{ id: 'u1', name: '태호', initial: '태', color: 'var(--collab-1)' }],
       presence: [],
-      data: { items: [] },
+      data,
     }
     return { tripId }
   }

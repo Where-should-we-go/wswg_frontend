@@ -17,20 +17,21 @@ vi.mock('@/services/attractions', () => ({
 vi.mock('@/services/groups', () => ({
   getGroups: vi.fn(async () => []),
 }))
-// ① 후보 생성 호출만 검증(후보 화면으로 전환). 후보/추천 후속 단계는 별도 서비스 스펙에서.
+// 폼 제출 시 message 합성만 검증(이후 추천 선택 단계로 전환). 추천/생성은 별도 스펙에서.
 const createTripCandidates = vi.fn(async () => ({
   sessionId: 's1',
   reply: '후보를 골라봤어요.',
   candidates: [{ candidateId: 'c1', name: '경복궁', regionHint: '서울 종로구' }],
-  nextQuestion: '',
+}))
+const recommendTrip = vi.fn(async () => ({
+  recommendations: [{ contentId: 1, title: '경복궁', contentTypeId: 12, sidoName: '서울', gugunName: '종로구', similarity: 0.9 }],
 }))
 vi.mock('@/services/aiTrip', async (importOriginal) => {
   const actual = await importOriginal()
   return {
     ...actual, // buildTripMessage 등 순수 헬퍼는 실제 구현 사용.
     createTripCandidates: (...args) => createTripCandidates(...args),
-    recommendTrip: vi.fn(),
-    createAiTripPlan: vi.fn(),
+    recommendTrip: (...args) => recommendTrip(...args),
   }
 })
 
@@ -78,8 +79,8 @@ describe('S5 자유 서술 입력', () => {
     const { message } = createTripCandidates.mock.calls[0][0]
     expect(message).toContain('맛집 위주로 부탁해요')
     expect(message).not.toContain('  맛집')
-    // 후보 화면으로 전환된다(아직 라우팅하지 않음).
+    // 추천 선택 화면으로 전환된다(아직 라우팅하지 않음).
     expect(push).not.toHaveBeenCalled()
-    expect(wrapper.text()).toContain('마음에 드는 곳을 골라주세요')
+    expect(wrapper.text()).toContain('어디를 둘러볼까요?')
   })
 })
