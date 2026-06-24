@@ -20,7 +20,7 @@ const chipClass = computed(() =>
     props.size === "sm" ? "px-[11px] py-[5px] text-[12px]" : "px-3 py-1.5 text-[12.5px]",
     props.on
       ? props.tone === "brand"
-        ? "border-[var(--primary)] bg-[var(--primary)] text-white"
+        ? "border-[color-mix(in_srgb,var(--primary)_35%,transparent)] bg-[var(--brand-soft)] text-[var(--brand-ink)]"
         : "border-[var(--foreground)] bg-[var(--foreground)] text-white"
       : "border-[var(--input)] bg-[var(--card)] text-[var(--ink-2)] hover:bg-[var(--accent)]",
     props.class,
