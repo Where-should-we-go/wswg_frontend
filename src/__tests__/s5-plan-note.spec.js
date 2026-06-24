@@ -17,10 +17,22 @@ vi.mock('@/services/attractions', () => ({
 vi.mock('@/services/groups', () => ({
   getGroups: vi.fn(async () => []),
 }))
-const autoGeneratePlan = vi.fn(async () => ({ tripId: 99 }))
-vi.mock('@/services/trips', () => ({
-  autoGeneratePlan: (...args) => autoGeneratePlan(...args),
+// ① 후보 생성 호출만 검증(후보 화면으로 전환). 후보/추천 후속 단계는 별도 서비스 스펙에서.
+const createTripCandidates = vi.fn(async () => ({
+  sessionId: 's1',
+  reply: '후보를 골라봤어요.',
+  candidates: [{ candidateId: 'c1', name: '경복궁', regionHint: '서울 종로구' }],
+  nextQuestion: '',
 }))
+vi.mock('@/services/aiTrip', async (importOriginal) => {
+  const actual = await importOriginal()
+  return {
+    ...actual, // buildTripMessage 등 순수 헬퍼는 실제 구현 사용.
+    createTripCandidates: (...args) => createTripCandidates(...args),
+    recommendTrip: vi.fn(),
+    createAiTripPlan: vi.fn(),
+  }
+})
 
 function mountView() {
   return mount(PlanNewView, { global: { stubs: { 'router-link': true } } })
@@ -28,7 +40,7 @@ function mountView() {
 
 describe('S5 자유 서술 입력', () => {
   beforeEach(() => {
-    autoGeneratePlan.mockClear()
+    createTripCandidates.mockClear()
     push.mockClear()
   })
 
@@ -41,7 +53,7 @@ describe('S5 자유 서술 입력', () => {
     expect(wrapper.text()).toContain('14/500')
   })
 
-  it('작성한 내용이 자동 생성 요청 본문(note)에 담겨 전달된다', async () => {
+  it('작성한 내용이 후보 생성 message 에 담겨 전달된다', async () => {
     const wrapper = mountView()
     await flushPromises()
 
@@ -61,8 +73,13 @@ describe('S5 자유 서술 입력', () => {
     await genBtn.trigger('click')
     await flushPromises()
 
-    expect(autoGeneratePlan).toHaveBeenCalledTimes(1)
-    // 앞뒤 공백은 trim 되어 전달된다.
-    expect(autoGeneratePlan.mock.calls[0][0]).toMatchObject({ note: '맛집 위주로 부탁해요' })
+    expect(createTripCandidates).toHaveBeenCalledTimes(1)
+    // 자유서술은 trim 되어 합성된 자연어 message 에 포함된다.
+    const { message } = createTripCandidates.mock.calls[0][0]
+    expect(message).toContain('맛집 위주로 부탁해요')
+    expect(message).not.toContain('  맛집')
+    // 후보 화면으로 전환된다(아직 라우팅하지 않음).
+    expect(push).not.toHaveBeenCalled()
+    expect(wrapper.text()).toContain('마음에 드는 곳을 골라주세요')
   })
 })

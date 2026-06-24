@@ -13,5 +13,4 @@ export { default as AddBlockRow } from "./AddBlockRow.vue";
 export { default as TripGalleryView } from "./TripGalleryView.vue";
 export { default as TripMapView } from "./TripMapView.vue";
 export { default as TripBoardView } from "./TripBoardView.vue";
-export { default as TripGenerateDialog } from "./TripGenerateDialog.vue";
 export { default as TripCreateDialog } from "./TripCreateDialog.vue";

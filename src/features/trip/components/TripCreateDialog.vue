@@ -1,6 +1,6 @@
 <script setup>
 // TripCreateDialog — 여행 생성(수동) 모달. ui/dialog 기반.
-// 제목 · 일정 · 그룹을 직접 입력해 새 여행을 만든다. 자동 생성은 TripGenerateDialog.
+// 제목 · 일정 · 그룹을 직접 입력해 새 여행을 만든다. 자동(AI) 생성은 /plans/new(PlanNewView).
 // 카피 해요체. 생성 성공 시 created 이벤트 + trip-editor 라우트로 이동.
 // 얇게: ui/ 조각(Dialog·Input·Button·DropdownMenu) 조립 + 로컬 입력/검증 상태.
 import { ref, computed, watch } from "vue";
