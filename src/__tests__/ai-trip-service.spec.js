@@ -65,7 +65,7 @@ describe('AI 추천 서비스 (mock 분기)', () => {
     expect(r).toHaveProperty('longitude')
   })
 
-  it('contentTypeId=음식점 으로 식당만 추천받는다', async () => {
+  it('contentTypeId=음식점 으로 식당만 추천받는다(일수×2)', async () => {
     const { sessionId, candidates } = await createTripCandidates({ message: 'x', count: 4 })
     const ids = candidates.map((c) => c.candidateId)
     const restaurants = await recommendRestaurants({
@@ -73,8 +73,8 @@ describe('AI 추천 서비스 (mock 분기)', () => {
       selectedCandidateIds: ids,
       days: 2,
     })
-    // 일수(2)×3 = 6 끼니 만큼 요청.
-    expect(restaurants.length).toBeLessThanOrEqual(6)
+    // 일수(2)×2 = 4 끼니(점심·저녁) 만큼 요청.
+    expect(restaurants.length).toBeLessThanOrEqual(4)
     expect(restaurants.length).toBeGreaterThan(0)
   })
 })
@@ -94,23 +94,49 @@ describe('buildItinerary — 일정 조립(끼니 자동)', () => {
     longitude: 126,
   }))
 
-  it('일자별로 식당 3끼와 관광지를 배치한다', () => {
+  it('하루 기본 시간표(관광3+식당2)를 시간대까지 배치한다', () => {
+    // 하루에 관광 3 + 식당 2 가 다 차는 경우.
     const items = buildItinerary({
-      attractions,
-      restaurants,
+      attractions, // 3
+      restaurants: restaurants.slice(0, 2), // 2
+      startDate: '2026-07-01',
+      endDate: '2026-07-01', // 1일
+    })
+    expect(items.map((it) => it.type)).toEqual(['관광', '식당', '관광', '식당', '관광'])
+    expect(items.map((it) => it.time)).toEqual(['09:00', '12:00', '14:00', '18:00', '20:00'])
+    expect(items.map((it) => it.durationMin)).toEqual([120, 60, 120, 60, 120])
+    expect(items.map((it) => it.order)).toEqual([1, 2, 3, 4, 5])
+    const meals = items.filter((it) => it.type === '식당')
+    expect(meals.map((m) => m.properties.meal)).toEqual(['점심', '저녁'])
+    expect(items.every((it) => it.properties.source === 'AI_RECOMMENDATION')).toBe(true)
+  })
+
+  it('여러 날이면 식당은 하루 2끼(점심·저녁)씩, 관광지는 날짜에 분배된다', () => {
+    const items = buildItinerary({
+      attractions, // 3
+      restaurants, // 6
       startDate: '2026-07-01',
       endDate: '2026-07-02', // 2일
     })
-    const meals = items.filter((it) => it.type === '식당')
-    const sights = items.filter((it) => it.type === '관광')
-    expect(meals.length).toBe(6) // 2일 × 3끼
-    expect(sights.length).toBe(3) // 선택 관광 전부
-    // 날짜는 두 날에 걸쳐 있고, 각 아이템에 source 태그가 붙는다.
-    const dates = new Set(items.map((it) => it.visitDate))
-    expect(dates).toEqual(new Set(['2026-07-01', '2026-07-02']))
-    expect(items.every((it) => it.properties.source === 'AI_RECOMMENDATION')).toBe(true)
-    // 끼니엔 meal 라벨(아침/점심/저녁)이 있다.
-    expect(meals.every((m) => ['아침', '점심', '저녁'].includes(m.properties.meal))).toBe(true)
+    expect(items.filter((it) => it.type === '식당').length).toBe(4) // 2일 × 2끼
+    expect(items.filter((it) => it.type === '관광').length).toBe(3)
+    expect(new Set(items.map((it) => it.visitDate))).toEqual(
+      new Set(['2026-07-01', '2026-07-02']),
+    )
+  })
+
+  it('하루 관광 슬롯(3)을 넘는 선택은 시간 없이 뒤에 붙인다(캘린더 배치용)', () => {
+    const many = Array.from({ length: 5 }, (_, i) => ({ contentId: i + 1, title: `관광${i}`, contentTypeId: 12 }))
+    const items = buildItinerary({
+      attractions: many,
+      restaurants: restaurants.slice(0, 2),
+      startDate: '2026-07-01',
+      endDate: '2026-07-01', // 1일 → 관광 5개 중 3개만 시간 슬롯
+    })
+    const timed = items.filter((it) => it.type === '관광' && it.time)
+    const untimed = items.filter((it) => it.type === '관광' && !it.time)
+    expect(timed.length).toBe(3)
+    expect(untimed.length).toBe(2)
   })
 
   it('기간이 없으면 빈 배열', () => {

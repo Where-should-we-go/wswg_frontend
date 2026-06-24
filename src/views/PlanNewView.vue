@@ -428,8 +428,8 @@ function cancel() {
       >
         <h2 class="text-sm font-semibold text-[var(--ink)]">어디를 둘러볼까요?</h2>
         <p class="mt-1 text-sm text-[var(--ink-2)]">
-          {{ aiReply || '취향에 맞는 실제 관광지를 골라봤어요.' }} 고른 곳에 더해, 하루 세 끼
-          식당은 일정에 자동으로 넣어드려요.
+          {{ aiReply || '취향에 맞는 실제 관광지를 골라봤어요.' }} 고른 곳에 더해, 점심·저녁
+          식당과 기본 시간대까지 일정에 자동으로 넣어드려요.
         </p>
 
         <ul class="mt-4 grid grid-cols-1 gap-2.5 sm:grid-cols-2">

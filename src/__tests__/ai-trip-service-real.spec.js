@@ -37,11 +37,11 @@ describe('AI 추천 서비스 (실제 API 분기)', () => {
     )
   })
 
-  it('식당 추천 → 일수×3(상한 30) limit 으로 음식점만 요청', async () => {
+  it('식당 추천 → 일수×2(상한 30) limit 으로 음식점만 요청', async () => {
     await recommendRestaurants({ sessionId: 's1', selectedCandidateIds: ['c1', 'c2'], days: 3 })
     const [, body] = apiPost.mock.calls[0]
     expect(body.contentTypeId).toBe(39)
-    expect(body.limit).toBe(9) // 3일 × 3끼
+    expect(body.limit).toBe(6) // 3일 × 2끼(점심·저녁)
   })
 
   it('여행 생성 → POST /api/trips (조립한 data.items 그대로 저장)', async () => {

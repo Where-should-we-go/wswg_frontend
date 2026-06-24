@@ -92,7 +92,8 @@ export function dayList(startDate, endDate) {
 }
 
 // 추천 1건(관광지/식당)을 trips.data.items 블록으로 변환.
-function toItem(rec, { type, date, meal }) {
+// time(HH:MM)·durationMin 을 넣어 캘린더에 바로 배치되게 한다(조정은 사용자가).
+function toItem(rec, { type, date, time = null, durationMin = null, meal }) {
   return {
     id: '',
     content_id: rec.contentId,
@@ -107,41 +108,65 @@ function toItem(rec, { type, date, meal }) {
     lat: rec.latitude ?? null,
     lng: rec.longitude ?? null,
     visitDate: date,
+    time,
+    durationMin,
     media: [],
     properties: {
       source: 'AI_RECOMMENDATION',
       similarity: rec.similarity,
       score: rec.score,
       region: rec.sidoName ? `${rec.sidoName} ${rec.gugunName ?? ''}`.trim() : undefined,
-      meal, // 아침/점심/저녁 (식당만)
+      meal, // 점심/저녁 (식당만)
     },
   }
 }
 
-// 선택 관광지 + 식당으로 일자별 일정을 조립한다.
-// 하루 = 아침 → 관광 절반 → 점심 → 관광 나머지 → 저녁. 식당은 일자당 최대 3끼.
-// 관광지는 일자 수만큼 라운드로빈으로 분배한다.
+// 하루 기본 시간표(최소 기본값). 캘린더 조정 편의를 위해 시간대를 미리 잡는다.
+//   오전 관광 09:00(120) · 점심 식당 12:00(60) · 오후 관광 14:00(120)
+//   · 저녁 식당 18:00(60) · 저녁활동 관광 20:00(120)
+// → 하루 관광 3 + 식당 2.
+const DAY_PLAN = [
+  { kind: '관광', time: '09:00', durationMin: 120 },
+  { kind: '식당', time: '12:00', durationMin: 60, meal: '점심' },
+  { kind: '관광', time: '14:00', durationMin: 120 },
+  { kind: '식당', time: '18:00', durationMin: 60, meal: '저녁' },
+  { kind: '관광', time: '20:00', durationMin: 120 },
+]
+// 하루에 필요한 관광/식당 수.
+export const ATTRACTIONS_PER_DAY = DAY_PLAN.filter((s) => s.kind === '관광').length // 3
+export const RESTAURANTS_PER_DAY = DAY_PLAN.filter((s) => s.kind === '식당').length // 2
+
+// 선택 관광지 + 식당으로 일자별 일정을 조립한다(DAY_PLAN 시간표대로).
+// 관광지는 일자 수만큼 라운드로빈 분배. 하루 슬롯(관광 3)을 넘는 관광지는 시간 없이 뒤에 붙인다.
 export function buildItinerary({ attractions = [], restaurants = [], startDate, endDate }) {
   const days = dayList(startDate, endDate)
   if (days.length === 0) return []
 
-  // 관광지를 일자별 버킷으로 분배.
-  const buckets = days.map(() => [])
-  attractions.forEach((a, i) => buckets[i % days.length].push(a))
+  const attrBuckets = days.map(() => [])
+  attractions.forEach((a, i) => attrBuckets[i % days.length].push(a))
 
-  const meals = ['아침', '점심', '저녁']
   const items = []
   let seq = 0
   days.forEach((date, di) => {
-    const dayMeals = restaurants.slice(di * 3, di * 3 + 3)
-    const dayAttr = buckets[di]
-    const half = Math.ceil(dayAttr.length / 2)
+    const dayAttr = attrBuckets[di].slice()
+    const dayRest = restaurants.slice(di * RESTAURANTS_PER_DAY, (di + 1) * RESTAURANTS_PER_DAY)
+    let ri = 0
     const seqForDay = []
-    if (dayMeals[0]) seqForDay.push(toItem(dayMeals[0], { type: '식당', date, meal: meals[0] }))
-    dayAttr.slice(0, half).forEach((a) => seqForDay.push(toItem(a, { type: '관광', date })))
-    if (dayMeals[1]) seqForDay.push(toItem(dayMeals[1], { type: '식당', date, meal: meals[1] }))
-    dayAttr.slice(half).forEach((a) => seqForDay.push(toItem(a, { type: '관광', date })))
-    if (dayMeals[2]) seqForDay.push(toItem(dayMeals[2], { type: '식당', date, meal: meals[2] }))
+    for (const slot of DAY_PLAN) {
+      if (slot.kind === '관광') {
+        const a = dayAttr.shift()
+        if (a) seqForDay.push(toItem(a, { type: '관광', date, time: slot.time, durationMin: slot.durationMin }))
+      } else {
+        const r = dayRest[ri++]
+        if (r) {
+          seqForDay.push(
+            toItem(r, { type: '식당', date, time: slot.time, durationMin: slot.durationMin, meal: slot.meal }),
+          )
+        }
+      }
+    }
+    // 슬롯(관광 3)을 넘는 선택 관광지는 시간 없이 뒤에 붙여 캘린더에서 배치.
+    dayAttr.forEach((a) => seqForDay.push(toItem(a, { type: '관광', date, durationMin: 120 })))
     seqForDay.forEach((it, i) => {
       it.id = `ai-${++seq}`
       it.order = i + 1
@@ -151,9 +176,9 @@ export function buildItinerary({ attractions = [], restaurants = [], startDate, 
   return items
 }
 
-// 세션의 후보 전체로 식당을 추천받는다. 일수×3 끼니만큼(상한 30) 확보.
+// 세션의 후보 전체로 식당을 추천받는다. 일수×2 끼니(점심·저녁)만큼(상한 30) 확보.
 export async function recommendRestaurants({ sessionId, selectedCandidateIds, days }) {
-  const limit = Math.min(MAX_LIMIT, Math.max(1, days * 3))
+  const limit = Math.min(MAX_LIMIT, Math.max(1, days * RESTAURANTS_PER_DAY))
   const res = await recommendTrip({
     sessionId,
     selectedCandidateIds,
