@@ -100,8 +100,22 @@ function onCompositionEnd(e) {
 // ── 같은 날 순서 재배치(드래그핸들 ⋮⋮) ─────────────────────
 // 핸들에서 드래그 시작, 다른 블록 위로 드롭하면 그 블록 앞으로 재배치(reorder).
 const reorderOver = ref(false)
-function onHandleDragStart() {
+const rootEl = ref(null)
+const dragging = ref(false)
+function onHandleDragStart(ev) {
+  // 드래그 고스트를 작은 핸들이 아니라 블록 카드 전체로 잡는다(노션식 반투명 미리보기가 따라옴).
+  // setDragImage 는 호출 시점의 렌더를 스냅샷 → opacity 흐리기는 이 뒤에 적용해 고스트엔 영향 없음.
+  if (ev.dataTransfer && rootEl.value) {
+    ev.dataTransfer.effectAllowed = 'move'
+    const r = rootEl.value.getBoundingClientRect()
+    ev.dataTransfer.setDragImage(rootEl.value, ev.clientX - r.left, ev.clientY - r.top)
+  }
+  dragging.value = true
   emit('dragstart', props.block.id)
+}
+function onHandleDragEnd() {
+  dragging.value = false
+  emit('dragend')
 }
 function onBlockDrop() {
   reorderOver.value = false
@@ -198,15 +212,22 @@ onBeforeUnmount(() => {
 
 <template>
   <div
-    class="group relative flex gap-[11px] rounded-[7px] px-2 py-[9px] transition-colors"
+    ref="rootEl"
+    class="group relative flex gap-[11px] rounded-[7px] px-2 py-[9px] transition-[opacity,background-color] duration-150"
     :class="[
       editingByOther ? 'bg-[var(--selected-bg)]' : 'hover:bg-[var(--hover)]',
-      reorderOver ? 'ring-2 ring-[var(--brand)]' : '',
+      dragging ? 'opacity-40' : '',
     ]"
     @dragover.prevent="!readonly && (reorderOver = true)"
     @dragleave="reorderOver = false"
     @drop.prevent="!readonly && onBlockDrop()"
   >
+    <!-- 드롭 위치 삽입 라인(노션식) — 이 블록 바로 위로 들어온다. -->
+    <span
+      v-if="reorderOver && !dragging"
+      class="pointer-events-none absolute -top-px left-0 right-0 z-10 h-[2.5px] rounded-full bg-[var(--brand)]"
+      aria-hidden="true"
+    />
     <!-- 레일 점(타입색) -->
     <span
       class="absolute top-4 size-[9px] rounded-full bg-[var(--background)] ring-[3px] ring-[var(--background)]"
@@ -234,7 +255,7 @@ onBeforeUnmount(() => {
         aria-label="블록 이동·순서 변경"
         title="드래그해서 옮기기 · 순서 변경"
         @dragstart="onHandleDragStart"
-        @dragend="emit('dragend')"
+        @dragend="onHandleDragEnd"
       >
         <GripVertical class="size-[15px]" />
       </span>
