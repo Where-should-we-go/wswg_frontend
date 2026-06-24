@@ -1,0 +1,96 @@
+// 모임 도메인 (S9 모임 관리 · 셸 워크스페이스 스위처).
+import { apiGet, apiPost, apiDelete } from './api'
+import { USE_MOCK, mockDelay, toQuery } from './config'
+import * as db from './mock/db'
+
+let mockGroupSeq = 100
+let mockUserSeq = 100
+
+// 카드/스위처용 요약(+멤버수).
+export async function getGroups() {
+  if (USE_MOCK) {
+    await mockDelay()
+    return db.GROUPS.map((g) => ({ ...g, memberCount: g.members.length }))
+  }
+  return apiGet('/api/groups')
+}
+
+export async function getGroup(groupId) {
+  if (USE_MOCK) {
+    await mockDelay(150)
+    const g = db.GROUPS.find((x) => x.groupId === Number(groupId))
+    return g ? { ...g, memberCount: g.members.length } : null
+  }
+  return apiGet(`/api/groups/${groupId}`)
+}
+
+export async function createGroup(groupName) {
+  if (USE_MOCK) {
+    await mockDelay()
+    const group = {
+      groupId: ++mockGroupSeq,
+      groupName,
+      emoji: '✨',
+      tripCount: 0,
+      members: [{ ...db.CURRENT_USER, userId: db.CURRENT_USER.id, role: 'OWNER', joinedAt: today() }],
+    }
+    db.GROUPS.unshift(group)
+    return { ...group, memberCount: group.members.length }
+  }
+  return apiPost('/api/groups', { groupName })
+}
+
+// 초대 링크 발급(C2). 토큰 URL + 만료.
+export async function createInviteLink(groupId) {
+  if (USE_MOCK) {
+    await mockDelay()
+    const token = `mock-${groupId}-${Math.floor(performance.now())}`
+    return {
+      token,
+      url: `${location.origin}/groups/join?token=${token}`,
+      expiresAt: '24시간 뒤 만료',
+    }
+  }
+  return apiPost(`/api/groups/${groupId}/invite-link`)
+}
+
+export async function joinByToken(token) {
+  if (USE_MOCK) {
+    await mockDelay()
+    return db.GROUPS[0] ? { ...db.GROUPS[0], memberCount: db.GROUPS[0].members.length } : null
+  }
+  return apiPost(`/api/groups/join${toQuery({ token })}`)
+}
+
+// 멤버 직접 추가(C2). payload: { name|email }
+export async function addMember(groupId, payload) {
+  if (USE_MOCK) {
+    await mockDelay()
+    const g = db.GROUPS.find((x) => x.groupId === Number(groupId))
+    if (!g) return null
+    const member = {
+      userId: `u${++mockUserSeq}`,
+      name: payload.name ?? payload.email ?? '새 멤버',
+      profileImageUrl: '',
+      role: 'MEMBER',
+      joinedAt: today(),
+    }
+    g.members.push(member)
+    return member
+  }
+  return apiPost(`/api/groups/${groupId}/members`, payload)
+}
+
+export async function removeMember(groupId, userId) {
+  if (USE_MOCK) {
+    await mockDelay()
+    const g = db.GROUPS.find((x) => x.groupId === Number(groupId))
+    if (g) g.members = g.members.filter((m) => m.userId !== userId)
+    return null
+  }
+  return apiDelete(`/api/groups/${groupId}/members/${userId}`)
+}
+
+function today() {
+  return new Date().toISOString().slice(0, 10)
+}

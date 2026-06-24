@@ -1,3 +1,6 @@
+import { USE_MOCK } from './config'
+import { CURRENT_USER } from './mock/db'
+
 const LOGGED_OUT_KEY = 'wswg.loggedOut'
 const LEGACY_ACCESS_TOKEN_KEY = 'wswg.accessToken'
 
@@ -51,6 +54,14 @@ export async function refreshAccessToken() {
 }
 
 export async function getCurrentUser() {
+  // mock 모드: 로그아웃 상태가 아니면 항상 로그인된 사용자로 본다(데모).
+  if (USE_MOCK) {
+    if (isLoggedOut()) {
+      throw new Error('로그인이 필요합니다.')
+    }
+    return { ...CURRENT_USER }
+  }
+
   const response = await authFetch('/auth/me')
 
   if (!response.ok) {
@@ -58,6 +69,36 @@ export async function getCurrentUser() {
   }
 
   return response.json()
+}
+
+// 앱 부팅 시 1회: refreshToken 쿠키로 accessToken 을 무음 재발급한다.
+// 새로고침/직접 URL 진입은 메모리의 accessToken 이 비어 있으므로, 가드가
+// 인증 여부를 판정하기 전에 이 완료를 기다려야 한다. 실패(미로그인)는 조용히 흡수.
+let bootstrapPromise = null
+export function ensureAuthReady() {
+  if (USE_MOCK || isLoggedOut() || getAccessToken()) {
+    return Promise.resolve()
+  }
+  if (!bootstrapPromise) {
+    bootstrapPromise = refreshAccessToken().catch(() => {})
+  }
+  return bootstrapPromise
+}
+
+// 라우터 가드용 동기 판정. mock 모드는 로그아웃 안 했으면 인증된 것으로 본다.
+export function isAuthenticated() {
+  if (USE_MOCK) {
+    return !isLoggedOut()
+  }
+  return getAccessToken() != null
+}
+
+// mock 모드 현재 사용자 role(가드용). 실제 모드는 getCurrentUser 로 확인.
+export function currentRole() {
+  if (USE_MOCK) {
+    return isLoggedOut() ? null : CURRENT_USER.role
+  }
+  return null
 }
 
 export async function authFetch(input, init = {}) {

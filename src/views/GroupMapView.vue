@@ -1,7 +1,7 @@
 <script setup>
-// GroupMapView (route entry) — /map. AppShell 안에서 렌더.
-// 얇게: features/map 의 그룹 지도 화면을 그대로 위임.
-import { GroupMapView } from "@/features/map/components";
+// GroupMapView (route entry) — /groups/:id/map. AppShell 안 본문 캔버스만 렌더.
+// 얇게: features/map 의 발자취 지도 화면에 위임(route param id 는 내부에서 읽음).
+import { GroupMapView } from '@/features/map/components'
 </script>
 
 <template>

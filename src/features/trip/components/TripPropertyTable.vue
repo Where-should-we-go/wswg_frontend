@@ -11,10 +11,29 @@ const props = defineProps({
 });
 
 function fmt(d) {
+  if (!d) return "미정";
   const dt = new Date(d + "T00:00:00");
   return `${dt.getFullYear()}. ${dt.getMonth() + 1}. ${dt.getDate()}`;
 }
 const dateRange = computed(() => `${fmt(props.trip.start_date)} → ${fmt(props.trip.end_date)}`);
+
+// 지역: { label } 객체 | 문자열 | null 모두 허용.
+const regionLabel = computed(() => {
+  const r = props.trip.region;
+  if (!r) return null;
+  return typeof r === "string" ? r : (r.label ?? null);
+});
+
+// 스타일: "맛집"(문자열) | { label, emoji?, type? } 둘 다 허용 → 통일 형태.
+const styleTags = computed(() =>
+  (props.trip.styles ?? []).map((s) =>
+    typeof s === "string"
+      ? { label: s, emoji: "", type: "tour" }
+      : { label: s.label, emoji: s.emoji ?? "", type: s.type ?? "tour" },
+  ),
+);
+
+const members = computed(() => props.trip.members ?? []);
 
 // AvatarStack 의 --collab-* 라운드로빈과 일치시키기 위한 fallback.
 const ROTATION = ["var(--collab-1)", "var(--collab-2)", "var(--collab-3)"];
@@ -38,7 +57,8 @@ function memberColor(m, i) {
       <MapPin class="size-4 text-[var(--ink-3)]" /> 지역
     </div>
     <div class="flex flex-wrap items-center gap-1.5 rounded-sm px-2 py-[5px] hover:bg-[var(--accent)]">
-      <BlockTag type="tour" :label="trip.region.label" hide-emoji />
+      <BlockTag v-if="regionLabel" type="tour" :label="regionLabel" hide-emoji />
+      <span v-else class="text-[13.5px] text-[var(--ink-3)]">미정</span>
     </div>
 
     <!-- 동행 -->
@@ -47,7 +67,7 @@ function memberColor(m, i) {
     </div>
     <div class="flex flex-wrap items-center gap-1.5 rounded-sm px-2 py-[5px] hover:bg-[var(--accent)]">
       <span
-        v-for="(m, i) in trip.members"
+        v-for="(m, i) in members"
         :key="m.id"
         class="inline-flex items-center gap-1.5 rounded-full bg-[var(--accent)] py-0.5 pr-2.5 pl-[3px] text-[12.5px] font-medium"
       >
@@ -66,12 +86,13 @@ function memberColor(m, i) {
     </div>
     <div class="flex flex-wrap items-center gap-1.5 rounded-sm px-2 py-[5px] hover:bg-[var(--accent)]">
       <BlockTag
-        v-for="s in trip.styles"
+        v-for="s in styleTags"
         :key="s.label"
         :type="s.type"
-        :label="`${s.emoji} ${s.label}`"
+        :label="s.emoji ? `${s.emoji} ${s.label}` : s.label"
         hide-emoji
       />
+      <span v-if="!styleTags.length" class="text-[13.5px] text-[var(--ink-3)]">미정</span>
     </div>
 
     <!-- 예산 -->

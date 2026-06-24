@@ -15,15 +15,13 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { useGroupStore } from "@/stores/groups";
+import { createGroup } from "@/services/groups";
 
 const props = defineProps({
   open: { type: Boolean, default: false },
 });
 
 const emit = defineEmits(["update:open", "created"]);
-
-const groupStore = useGroupStore();
 
 const groupName = ref("");
 const submitting = ref(false);
@@ -40,7 +38,7 @@ async function submit() {
   submitting.value = true;
   errorMsg.value = "";
   try {
-    const group = await groupStore.createGroup(groupName.value.trim());
+    const group = await createGroup(groupName.value.trim());
     emit("created", group);
     groupName.value = "";
     emit("update:open", false);

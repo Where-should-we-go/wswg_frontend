@@ -71,6 +71,52 @@
   --collab-1: #2c6fe3;
   --collab-2: #e0633d;
   --collab-3: #3f9a6a;
+
+  /* ─────────────────────────────────────────────────────────────
+   * 디자인시스템 v0.3 semantic 별칭 (화면정의서 토큰명 = 기존 값)
+   * 화면정의서/디자인시스템 문서는 --brand·--action-bg·--danger 등으로 지칭한다.
+   * 기존 globals.css 는 shadcn 이름(--primary·--destructive…)을 쓰므로,
+   * 두 어휘가 같은 값을 가리키도록 별칭을 깐다. 어느 이름을 써도 동작.
+   * ───────────────────────────────────────────────────────────── */
+  /* primitive */
+  --paper: var(--background);
+  --line: var(--border);
+  --line-2: var(--input);
+  --brand: var(--primary);
+  --brand-ink: #1f5fcc;
+  --brand-soft: #eaf1fd;
+  /* semantic surface/text */
+  --bg-canvas: var(--background);
+  --bg-app: var(--sidebar);
+  --bg-subtle: var(--sunken);
+  --text-primary: var(--ink);
+  --text-muted: var(--ink-2);
+  --text-faint: var(--ink-3);
+  --border-strong: var(--input);
+  /* semantic action/state */
+  --action-bg: var(--primary);
+  --action-hover: var(--brand-ink);
+  --link: var(--brand-ink);
+  --selected-bg: var(--brand-soft);
+  --success: #3f9a6a;
+  --warning: #b7791f;
+  --danger: var(--destructive);
+  --info: #2c6fe3;
+  /* 협업 카렛 별칭 */
+  --c-1: var(--collab-1);
+  --c-2: var(--collab-2);
+  --c-3: var(--collab-3);
+  /* 블록 타입 단색 별칭(배경) — 짝 텍스트는 --tag-*-fg */
+  --t-blue: var(--tag-blue-bg);
+  --t-orange: var(--tag-orange-bg);
+  --t-gray: var(--tag-gray-bg);
+  --t-purple: var(--tag-purple-bg);
+  --t-yellow: var(--tag-yellow-bg);
+  --t-green: var(--tag-green-bg);
+  /* 모양 */
+  --radius-win: 12px;
+  --shadow-win: 0 24px 60px -16px rgba(20, 22, 26, 0.28), 0 8px 22px -10px rgba(20, 22, 26, 0.18);
+  --shadow-pop: 0 14px 38px -10px rgba(20, 22, 26, 0.26);
 }
 
 /* 다크모드: 추후 토큰 오버라이드 (디자인시스템.md §3.6). 지금은 자리만 확보. */
@@ -159,6 +205,37 @@
   --color-collab-2: var(--collab-2);
   --color-collab-3: var(--collab-3);
 
+  /* 디자인시스템 v0.3 semantic 별칭 유틸리티 (bg-brand, text-text-muted 등) */
+  --color-brand: var(--brand);
+  --color-brand-ink: var(--brand-ink);
+  --color-brand-soft: var(--brand-soft);
+  --color-action-bg: var(--action-bg);
+  --color-selected-bg: var(--selected-bg);
+  --color-bg-subtle: var(--bg-subtle);
+  --color-bg-app: var(--bg-app);
+  --color-hover: var(--hover);
+  --color-border-strong: var(--border-strong);
+  --color-text-primary: var(--text-primary);
+  --color-text-muted: var(--text-muted);
+  --color-text-faint: var(--text-faint);
+  --color-ink: var(--ink);
+  --color-ink-2: var(--ink-2);
+  --color-ink-3: var(--ink-3);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-danger: var(--danger);
+  --color-info: var(--info);
+  --color-c-1: var(--c-1);
+  --color-c-2: var(--c-2);
+  --color-c-3: var(--c-3);
+  --color-t-blue: var(--t-blue);
+  --color-t-orange: var(--t-orange);
+  --color-t-gray: var(--t-gray);
+  --color-t-purple: var(--t-purple);
+  --color-t-yellow: var(--t-yellow);
+  --color-t-green: var(--t-green);
+
+  --radius-win: 12px;
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);

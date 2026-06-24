@@ -16,9 +16,9 @@ onMounted(() => {
   }
 
   setAccessToken(token)
-  message.value = '로그인되었습니다. 홈으로 이동합니다.'
+  message.value = '로그인되었습니다. 이동합니다.'
 
-  router.replace({ name: 'home' })
+  router.replace({ name: 'attractions' })
 })
 </script>
 
