@@ -5,7 +5,7 @@
 //   Z3 뷰 탭: 📅 일정 / 🖼️ 갤러리 / 🗺️ 지도 / 📋 보드.
 //   일정 뷰: 보조 토글로 레일 ↔ 캘린더 전환.
 // 편집은 useTripEditor 로컬 낙관적 → updateTrip 전체 저장. 실시간(WS)은 mock stub.
-import { ref, reactive, computed } from 'vue'
+import { ref, reactive, computed, onMounted, watch } from 'vue'
 import { toast } from 'vue-sonner'
 import { uploadMedia } from '@/services/trips'
 import { getAttraction } from '@/services/attractions'
@@ -44,7 +44,21 @@ const emit = defineEmits(['delete'])
 const ed = useTripEditor(props.trip)
 
 // 여행 제목 라이브 입력 — 한글 IME 조합 중에는 커밋 보류(조합 끝나면 한 번에).
+// uncontrolled input: :value 로 묶으면 조합 중 다른 리렌더가 값을 덮어써 글자가 누락된다.
+// 마운트 시 1회 세팅하고, 외부(원격/트립 전환) 변경은 포커스 중이 아닐 때만 DOM 에 반영한다.
+const titleEl = ref(null)
 const titleComposing = ref(false)
+onMounted(() => {
+  if (titleEl.value) titleEl.value.value = ed.trip.value.title ?? ''
+})
+watch(
+  () => ed.trip.value.title,
+  (t) => {
+    const el = titleEl.value
+    if (!el || document.activeElement === el) return
+    if (el.value !== (t ?? '')) el.value = t ?? ''
+  },
+)
 function commitTitle(value) {
   ed.setTitle(value)
   // 사이드바 '내 여행' 목록은 별도 출처라 저장 왕복 전엔 안 바뀜 → 공유 override 로 즉시 반영.
@@ -329,9 +343,9 @@ function syncLabel() {
     <!-- 페이지 아이콘 -->
     <div class="-mt-[52px] mb-2 pl-1 text-[46px] leading-none">{{ ed.trip.value.icon }}</div>
 
-    <!-- 타이틀(라이브 인라인 편집 — 한글 IME 조합 가드) -->
+    <!-- 타이틀(라이브 인라인 편집 — uncontrolled, 한글 IME 조합 가드) -->
     <input
-      :value="ed.trip.value.title"
+      ref="titleEl"
       type="text"
       class="mt-[18px] mb-3.5 w-full bg-transparent text-[30px] font-extrabold tracking-[-0.03em] outline-none sm:text-[38px]"
       placeholder="여행 제목"
