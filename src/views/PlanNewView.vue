@@ -42,7 +42,8 @@ const sidoCode = ref(undefined)
 const gugunCode = ref(undefined)
 const startDate = ref('')
 const endDate = ref('')
-const headcount = ref(2)
+const DEFAULT_HEADCOUNT = 2
+const headcount = ref(DEFAULT_HEADCOUNT)
 const styles = ref([])
 const groupId = ref(undefined)
 
@@ -88,6 +89,19 @@ watch(sidoCode, async (code) => {
   gugunCode.value = undefined
   guguns.value = []
   if (code != null) guguns.value = await getGuguns(code)
+})
+
+// 모임을 고르면 인원 기본값을 그 모임의 멤버 수로 맞춘다(1~20 범위).
+// 개인 여행(모임 없음)으로 되돌리면 기본값으로 복귀.
+watch(groupId, (id) => {
+  if (id == null) {
+    headcount.value = DEFAULT_HEADCOUNT
+    return
+  }
+  const g = groups.value.find((it) => it.groupId === id)
+  if (g?.memberCount != null) {
+    headcount.value = Math.min(20, Math.max(1, g.memberCount))
+  }
 })
 
 // ── 기간 계산 ────────────────────────────────────────────────
