@@ -8,6 +8,7 @@ import { Sparkles } from '@lucide/vue'
 import { toast } from 'vue-sonner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Textarea } from '@/components/ui/textarea'
 import { Select } from '@/components/ui/select'
 import { getGuguns, getSidos } from '@/services/attractions'
 import { autoGeneratePlan } from '@/services/trips'
@@ -42,10 +43,14 @@ const sidoCode = ref(undefined)
 const gugunCode = ref(undefined)
 const startDate = ref('')
 const endDate = ref('')
-const DEFAULT_HEADCOUNT = 2
+// 개인 여행(모임 없음) 기본 인원 = 1명. 모임을 고르면 아래 watch 에서 멤버 수로 맞춘다.
+const DEFAULT_HEADCOUNT = 1
 const headcount = ref(DEFAULT_HEADCOUNT)
 const styles = ref([])
 const groupId = ref(undefined)
+const NOTE_MAX = 500
+// 사용자가 직접 적는 자유 서술(원하는 여행). 선택 입력 — 생성 가능 조건엔 넣지 않는다.
+const note = ref('')
 
 const generating = ref(false)
 // 후보 0건(empty) · 권한 403 · 모임 없음 → 화면에 머물며 EmptyState/안내 표시.
@@ -157,6 +162,8 @@ async function generate() {
       headcount: headcount.value,
       styles: styles.value,
       groupId: groupId.value,
+      // 자유 서술 — 비어 있으면 보내지 않는다. 실서버(/api/plans/auto)에서 AI 프롬프트로 활용.
+      note: note.value.trim() || undefined,
     })
     // 후보 0건 → 이동하지 않고 화면 잔류(입력 보존) + EmptyState.
     if (empty || tripId == null) {
@@ -286,6 +293,21 @@ function cancel() {
         <section>
           <h2 class="mb-2 text-sm font-semibold text-[var(--ink)]">어떤 여행을 원해요?</h2>
           <StyleChipGroup v-model="styles" :options="STYLE_OPTIONS" />
+        </section>
+
+        <!-- 자유 서술: 원하는 여행을 직접 작성 (선택) -->
+        <section class="md:col-span-2">
+          <h2 class="mb-2 text-sm font-semibold text-[var(--ink)]">
+            원하는 여행을 자유롭게 적어주세요
+            <span class="font-normal text-[var(--ink-3)]">(선택)</span>
+          </h2>
+          <Textarea
+            v-model="note"
+            rows="3"
+            :maxlength="NOTE_MAX"
+            placeholder="예) 조용한 곳에서 푹 쉬고 싶어요. 아이와 함께라 일정은 너무 빡빡하지 않게, 맛집 위주로 부탁해요."
+          />
+          <p class="mt-1 text-right text-xs text-[var(--ink-3)]">{{ note.length }}/{{ NOTE_MAX }}</p>
         </section>
 
         <!-- 모임 선택 (선택) -->
