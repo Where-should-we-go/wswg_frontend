@@ -374,13 +374,15 @@ export const TRIPS = {
 }
 
 // ── 마이페이지 여행 카드 ─────────────────────────────────────
+// groupId: 여행이 속한 모임(사이드바 모임 드롭다운 필터용).
+// TODO(backend): 실 API에는 아직 트립↔모임 연결이 없어 mock 에서만 채움 — 연동되면 서버 응답으로 대체.
 export const MY_TRIPS = {
   mine: [
-    { tripId: 10, title: '부산 2박 3일', startDate: '2026-07-01', endDate: '2026-07-03', memberCount: 3, status: '예정', thumbnailUrl: 'https://images.unsplash.com/photo-1601063476271-a159c71ab0b3?w=600' },
-    { tripId: 11, title: '제주 힐링 여행', startDate: '2026-05-10', endDate: '2026-05-12', memberCount: 2, status: '완료', thumbnailUrl: 'https://images.unsplash.com/photo-1583316174775-bd6dc0e9f298?w=600' },
+    { tripId: 10, groupId: 5, title: '부산 2박 3일', startDate: '2026-07-01', endDate: '2026-07-03', memberCount: 3, status: '예정', thumbnailUrl: 'https://images.unsplash.com/photo-1601063476271-a159c71ab0b3?w=600' },
+    { tripId: 11, groupId: 5, title: '제주 힐링 여행', startDate: '2026-05-10', endDate: '2026-05-12', memberCount: 2, status: '완료', thumbnailUrl: 'https://images.unsplash.com/photo-1583316174775-bd6dc0e9f298?w=600' },
   ],
   joined: [
-    { tripId: 12, title: '회사 워크샵', startDate: '2026-06-22', endDate: '2026-06-24', memberCount: 5, status: '진행중', thumbnailUrl: '' },
+    { tripId: 12, groupId: 6, title: '회사 워크샵', startDate: '2026-06-22', endDate: '2026-06-24', memberCount: 5, status: '진행중', thumbnailUrl: '' },
   ],
 }
 

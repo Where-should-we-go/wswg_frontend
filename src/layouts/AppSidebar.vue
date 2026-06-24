@@ -1,35 +1,83 @@
 <script setup>
 // 앱 셸 좌측 사이드바(228px). 디자인시스템 §6.1.
-// 워크스페이스(모임) + nav(검색/홈/모임) + 내 여행/참여 중 트리 + 새 여행/모임.
+// 구조(B안): nav(검색/모임) → 현재 모임 드롭다운(전체 포함) → 내 여행/참여 중 → 새 여행/모임.
+// 모임 드롭다운으로 보고 있는 모임을 바꾸면 아래 내 여행/참여 중이 그 모임 것만 보인다('전체'면 모두).
 // 데이터는 서비스 레이어(mock↔실제 자동 전환)에서 로드 — 화면 본문과 정합.
-import { onMounted, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { RouterLink, useRoute } from 'vue-router'
-import { Search, Home, Users, Plus } from '@lucide/vue'
+import { Search, Users, Plus, ChevronDown } from '@lucide/vue'
 import { NavItem } from '@/components/ui/nav-item'
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+} from '@/components/ui/dropdown-menu'
 import { getGroups } from '@/services/groups'
 import { getMyTrips } from '@/services/mypage'
 
 const route = useRoute()
 
-// 워크스페이스(모임) — 첫 모임을 대표로 표시. 드롭다운 없음(클릭 시 모임 관리로).
-const workspace = ref(null)
+const ALL = '__all__' // 드롭다운 '전체 여행' 센티넬
+
+const groups = ref([])
 const myTrips = ref([])
 const joinedTrips = ref([])
 
+// 현재 보고 있는 모임. 셸↔attractions 간 같은 컴포넌트가 다시 마운트돼도 선택이 유지되도록 localStorage 동기화.
+const selectedGroupId = ref(loadSelected())
+
+function loadSelected() {
+  if (typeof localStorage === 'undefined') return ALL
+  return localStorage.getItem('wswg.sidebar.group') ?? ALL
+}
+watch(selectedGroupId, (v) => {
+  try {
+    localStorage.setItem('wswg.sidebar.group', v)
+  } catch {
+    /* 저장 불가 환경 무시 */
+  }
+})
+
+const currentGroup = computed(() =>
+  selectedGroupId.value === ALL
+    ? null
+    : (groups.value.find((g) => String(g.groupId) === String(selectedGroupId.value)) ?? null),
+)
+
 async function loadSidebar() {
-  const [groups, mine, joined] = await Promise.all([
+  const [gs, mine, joined] = await Promise.all([
     getGroups().catch(() => []),
     getMyTrips('mine').catch(() => []),
     getMyTrips('joined').catch(() => []),
   ])
-  workspace.value = groups[0] ?? null
+  groups.value = gs
   myTrips.value = mine
   joinedTrips.value = joined
+  // 저장된 선택이 사라진 모임이면 전체로 복귀.
+  if (
+    selectedGroupId.value !== ALL &&
+    !gs.some((g) => String(g.groupId) === String(selectedGroupId.value))
+  ) {
+    selectedGroupId.value = ALL
+  }
 }
 
 onMounted(loadSidebar)
 // 다른 화면에서 여행/모임을 만들고 돌아오면 트리도 최신으로(가벼운 갱신).
 watch(() => route.name, loadSidebar)
+
+// 선택 모임으로 여행 필터.
+// TODO(backend): 실데이터엔 트립 groupId가 없어 '전체'가 아니면 필터 결과가 비게 된다(mock 에서만 동작).
+//   트립↔모임 연동되면 getMyTrips(scope, groupId) 형태의 서버 필터로 대체.
+function filterByGroup(list) {
+  if (selectedGroupId.value === ALL) return list
+  return list.filter((t) => String(t.groupId) === String(selectedGroupId.value))
+}
+const visibleMyTrips = computed(() => filterByGroup(myTrips.value))
+const visibleJoinedTrips = computed(() => filterByGroup(joinedTrips.value))
 
 // 현재 보고 있는 여행인지(활성 표시).
 function isActiveTrip(tripId) {
@@ -41,31 +89,55 @@ function isActiveTrip(tripId) {
   <aside
     class="w-[228px] shrink-0 border-r border-[var(--border)] bg-[var(--sidebar)] px-2 py-3 text-[13.5px] text-[var(--sidebar-foreground)]"
   >
-    <!-- 워크스페이스(모임) — 드롭다운 없이 모임 관리로 가는 링크 -->
-    <RouterLink
+    <!-- nav (상단) -->
+    <NavItem
+      :as="RouterLink"
+      to="/attractions"
+      :icon="Search"
+      label="검색"
+      :active="route.name === 'attractions'"
+    />
+    <NavItem
+      :as="RouterLink"
       to="/groups"
-      class="mb-2 flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-[var(--accent)]"
-    >
-      <span
-        class="grid size-[22px] place-items-center rounded-md bg-[var(--brand)] text-[12px] font-extrabold text-white"
-        >{{ workspace?.emoji ?? '어' }}</span
-      >
-      <span class="truncate text-[13.5px] font-bold text-[var(--ink)]">
-        {{ workspace?.groupName ?? '내 워크스페이스' }}
-      </span>
-    </RouterLink>
+      :icon="Users"
+      label="모임"
+      :active="route.name === 'groups' || route.name === 'group-map'"
+    />
 
-    <!-- nav -->
-    <NavItem :as="RouterLink" to="/attractions" :icon="Search" label="검색" />
-    <NavItem :as="RouterLink" to="/mypage" :icon="Home" label="홈" />
-    <NavItem :as="RouterLink" to="/groups" :icon="Users" label="모임" />
+    <!-- 현재 모임 드롭다운 (전체 포함) -->
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        class="mt-2.5 flex w-full items-center gap-2 rounded-md border border-[var(--border)] bg-[var(--card)] px-2 py-1.5 text-left transition-colors hover:bg-[var(--accent)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring)]/40"
+        aria-label="모임 선택"
+      >
+        <span
+          class="grid size-[22px] shrink-0 place-items-center rounded-md bg-[var(--brand)] text-[12px] font-extrabold text-white"
+          >{{ currentGroup?.emoji ?? '🧭' }}</span
+        >
+        <span class="min-w-0 flex-1 truncate text-[13.5px] font-bold text-[var(--ink)]">
+          {{ currentGroup?.groupName ?? '전체 여행' }}
+        </span>
+        <ChevronDown class="size-3.5 shrink-0 text-[var(--ink-3)]" />
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" class="w-[212px]">
+        <DropdownMenuLabel>모임 선택</DropdownMenuLabel>
+        <DropdownMenuRadioGroup v-model="selectedGroupId">
+          <DropdownMenuRadioItem :value="ALL">전체 여행</DropdownMenuRadioItem>
+          <DropdownMenuRadioItem v-for="g in groups" :key="g.groupId" :value="String(g.groupId)">
+            <span class="mr-1">{{ g.emoji }}</span
+            >{{ g.groupName }}
+          </DropdownMenuRadioItem>
+        </DropdownMenuRadioGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
 
     <!-- 내 여행 -->
     <div class="px-2 pt-3.5 pb-[5px] text-[11px] font-bold tracking-[0.03em] text-[var(--ink-3)]">
       내 여행
     </div>
     <NavItem
-      v-for="trip in myTrips"
+      v-for="trip in visibleMyTrips"
       :key="trip.tripId"
       :as="RouterLink"
       :to="`/trips/${trip.tripId}`"
@@ -74,8 +146,8 @@ function isActiveTrip(tripId) {
       page
       :active="isActiveTrip(trip.tripId)"
     />
-    <p v-if="myTrips.length === 0" class="px-2 py-1 text-[12px] text-[var(--ink-3)]">
-      아직 여행이 없어요
+    <p v-if="visibleMyTrips.length === 0" class="px-2 py-1 text-[12px] text-[var(--ink-3)]">
+      {{ selectedGroupId === ALL ? '아직 여행이 없어요' : '이 모임의 여행이 없어요' }}
     </p>
 
     <!-- 참여 중 -->
@@ -83,7 +155,7 @@ function isActiveTrip(tripId) {
       참여 중
     </div>
     <NavItem
-      v-for="trip in joinedTrips"
+      v-for="trip in visibleJoinedTrips"
       :key="trip.tripId"
       :as="RouterLink"
       :to="`/trips/${trip.tripId}`"
@@ -92,18 +164,14 @@ function isActiveTrip(tripId) {
       page
       :active="isActiveTrip(trip.tripId)"
     />
-    <p v-if="joinedTrips.length === 0" class="px-2 py-1 text-[12px] text-[var(--ink-3)]">
-      참여 중인 여행이 없어요
+    <p v-if="visibleJoinedTrips.length === 0" class="px-2 py-1 text-[12px] text-[var(--ink-3)]">
+      {{
+        selectedGroupId === ALL ? '참여 중인 여행이 없어요' : '이 모임에 참여 중인 여행이 없어요'
+      }}
     </p>
 
     <!-- 새 여행 만들기 → 자동 생성(S5). 마이페이지 버튼과 동일 동작 -->
-    <NavItem
-      :as="RouterLink"
-      to="/plans/new"
-      :icon="Plus"
-      label="새 여행 만들기"
-      class="mt-2.5"
-    />
+    <NavItem :as="RouterLink" to="/plans/new" :icon="Plus" label="새 여행 만들기" class="mt-2.5" />
 
     <!-- 새 모임 → 모임 관리(S9)로 가며 생성 모달 자동 오픈 -->
     <NavItem
