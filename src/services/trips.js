@@ -168,14 +168,38 @@ export async function autoGeneratePlan(body) {
   return apiPost('/api/plans/auto', body)
 }
 
+function mediaTypeOf(file) {
+  const contentType = file?.type ?? ''
+  if (contentType.startsWith('video/')) return 'VIDEO'
+  if (contentType.startsWith('audio/')) return 'AUDIO'
+  return 'PHOTO'
+}
+
 // ── 미디어 업로드 (E1, S6) ───────────────────────────────────
-// formData: file, blockId, mediaType, metadata?
-export async function uploadMedia(tripId, formData) {
+// POST /api/trips/{tripId}/items/{itemId}/media
+// multipart/form-data: file, mediaType
+export async function uploadMedia(tripId, itemIdOrFormData, fileArg) {
   if (USE_MOCK) {
     await mockDelay(800)
-    return { url: '', mediaType: formData.get?.('mediaType') ?? 'PHOTO', metadata: {} }
+    const file = fileArg ?? itemIdOrFormData?.get?.('file')
+    return {
+      mediaId: `mock-media-${Date.now()}`,
+      mediaUrl: '',
+      mediaType: itemIdOrFormData?.get?.('mediaType') ?? mediaTypeOf(file),
+      metadata: {
+        originalFilename: file?.name ?? 'media',
+        contentType: file?.type ?? '',
+        size: file?.size ?? 0,
+      },
+    }
   }
-  return apiUpload(`/api/trips/${tripId}/media`, formData)
+
+  const itemId = itemIdOrFormData
+  const formData = new FormData()
+  formData.append('file', fileArg)
+  formData.append('mediaType', mediaTypeOf(fileArg))
+
+  return apiUpload(`/api/trips/${tripId}/items/${encodeURIComponent(itemId)}/media`, formData)
 }
 
 // startDate~endDate(포함) 사이의 "YYYY-MM-DD" 배열.

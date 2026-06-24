@@ -67,11 +67,23 @@ function selectRepresentative(p) {
         @click="openLightbox(p)"
       >
         <!-- 영상 표시 -->
+        <img
+          v-if="p.media.type === 'PHOTO' && p.media.url"
+          :src="p.media.url"
+          alt=""
+          class="h-full w-full object-cover"
+        />
         <span
           v-if="p.isVideo"
           class="absolute inset-0 grid place-items-center text-[22px] text-white"
           aria-hidden="true"
           >▶</span
+        >
+        <span
+          v-else-if="p.media.type === 'AUDIO'"
+          class="absolute inset-0 grid place-items-center text-[24px] text-white"
+          aria-hidden="true"
+          >🎙</span
         >
         <!-- 대표 배지 -->
         <span
@@ -116,7 +128,27 @@ function selectRepresentative(p) {
         @click.stop
       >
         <div class="grid aspect-video place-items-center">
-          <span v-if="lightbox.isVideo" class="text-[48px] text-white" aria-hidden="true">▶</span>
+          <video
+            v-if="lightbox.isVideo && lightbox.media.url"
+            :src="lightbox.media.url"
+            controls
+            class="h-full w-full bg-black object-contain"
+          />
+          <audio
+            v-else-if="lightbox.media.type === 'AUDIO' && lightbox.media.url"
+            :src="lightbox.media.url"
+            controls
+            class="w-4/5"
+          />
+          <img
+            v-else-if="lightbox.media.type === 'PHOTO' && lightbox.media.url"
+            :src="lightbox.media.url"
+            alt=""
+            class="h-full w-full object-contain"
+          />
+          <span v-else-if="lightbox.isVideo" class="text-[48px] text-white" aria-hidden="true"
+            >▶</span
+          >
           <span v-else class="text-[15px] font-medium text-white/90"
             >{{ lightbox.emoji }} {{ lightbox.blockTitle }}</span
           >
