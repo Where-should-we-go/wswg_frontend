@@ -9,7 +9,7 @@ import { ref, computed } from 'vue'
 import CalendarEvent from './CalendarEvent.vue'
 import AddBlockRow from './AddBlockRow.vue'
 import BlockTitleInput from './BlockTitleInput.vue'
-import { typeEmojiOf, railColorOf, transportOf } from '@/features/trip/lib/blockMeta'
+import { typeEmojiOf, railColorOf, transportOf, typeKeyOf } from '@/features/trip/lib/blockMeta'
 import {
   computeRange,
   hourMarks,
@@ -157,18 +157,34 @@ function updateMovePreview(ev) {
   const date = days.value[colIndex]?.date
   const minStart = range.value.startHour * 60
   const maxStart = range.value.endHour * 60 - SNAP_MIN
-  let startMin = snap(pointToMin(ev.clientY) - d.grabOffsetMin)
-  startMin = Math.min(Math.max(startMin, minStart), maxStart)
+  // raw = 커서를 그대로 따라가는 위치(부드럽게), snap = 5분 격자에 맞춘 착지 위치.
+  const rawStartMin = Math.min(Math.max(pointToMin(ev.clientY) - d.grabOffsetMin, minStart), maxStart)
+  const startMin = Math.min(Math.max(snap(rawStartMin), minStart), maxStart)
   d.overTray = pointInTray(ev.clientX, ev.clientY)
   d.preview = {
     colIndex,
     date,
     top: topFor(startMin),
+    rawTop: topFor(rawStartMin),
     height: heightFor(d.block, d.durationMin),
     startMin,
     durationMin: d.durationMin,
   }
 }
+
+// 떠다니는 클론(집어 든 블록) — 이동 모드에서 커서를 따라가며 실제 카드처럼 보인다.
+// 트레이 위(해제 모드)에선 숨긴다.
+const dragClone = computed(() => {
+  const d = drag.value
+  if (!d || d.mode !== 'move' || !d.preview || d.overTray) return null
+  return {
+    colIndex: d.preview.colIndex,
+    block: d.block,
+    typeKey: typeKeyOf(d.block.type),
+    isMove: d.block.type === '이동',
+    layout: { top: d.preview.rawTop, height: d.preview.height, cols: 1, colIndex: 0 },
+  }
+})
 function onMove(ev) {
   updateMovePreview(ev)
 }
@@ -411,15 +427,42 @@ const previewLabel = computed(() => {
               </div>
             </template>
 
-            <!-- 드래그 미리보기(고스트) — 트레이 위로 가면 숨김(해제 모드). -->
+            <!-- 착지 가이드(스냅 위치) — "여기 놓인다". 클론과 분리해 어디 떨어질지 보여줌. -->
             <div
               v-if="drag?.preview && drag.preview.colIndex === ci && !drag.overTray"
-              class="pointer-events-none absolute left-1.5 right-2 z-20 flex items-start justify-between gap-1 overflow-hidden rounded-lg border-2 border-[var(--brand)] bg-[var(--brand)]/10 px-[9px] py-1 text-[11px] font-semibold text-[var(--brand)]"
+              class="pointer-events-none absolute left-1.5 right-2 z-10 rounded-lg border-2 border-dashed border-[var(--brand)]/55 bg-[var(--brand)]/[0.07] transition-[top] duration-75"
               :style="{ top: `${drag.preview.top}px`, height: `${drag.preview.height}px` }"
             >
-              <span class="truncate">{{ drag.block.title }}</span>
-              <span class="shrink-0 tabular-nums">{{ previewLabel }}</span>
+              <span
+                class="absolute left-1.5 top-1 rounded bg-[var(--brand)] px-1.5 py-px text-[10.5px] font-semibold tabular-nums text-white shadow-sm"
+              >
+                {{ previewLabel }}
+              </span>
             </div>
+
+            <!-- 떠다니는 클론(집어 든 블록) — 실제 카드 모양 그대로, 커서를 부드럽게 따라가며 들어올림. -->
+            <template v-if="dragClone && dragClone.colIndex === ci">
+              <div
+                v-if="dragClone.isMove"
+                class="pointer-events-none absolute left-1.5 right-2 z-50 flex items-center gap-1.5 overflow-hidden rounded-md border border-dashed border-[var(--brand)] px-2 py-px text-[11px] text-[var(--tag-gray-fg)] scale-[1.03] rotate-[-0.5deg] opacity-95 shadow-[0_16px_32px_rgba(20,22,26,0.26)]"
+                :style="{
+                  top: `${dragClone.layout.top}px`,
+                  height: `${dragClone.layout.height}px`,
+                  background:
+                    'repeating-linear-gradient(135deg, var(--tag-gray-bg) 0 6px, var(--background) 6px 12px)',
+                }"
+              >
+                <span aria-hidden="true">{{ typeEmojiOf(dragClone.block.type) }}</span>
+                <span class="truncate">{{ moveText(dragClone.block) }}</span>
+              </div>
+              <CalendarEvent
+                v-else
+                :block="dragClone.block"
+                :layout="dragClone.layout"
+                :type-key="dragClone.typeKey"
+                class="pointer-events-none z-50 scale-[1.03] rotate-[-0.5deg] opacity-95 !shadow-[0_16px_32px_rgba(20,22,26,0.26)]"
+              />
+            </template>
 
             <!-- 빈 컬럼 힌트 — 끌어다 놓기 안내. -->
             <div
