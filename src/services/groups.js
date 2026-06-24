@@ -73,13 +73,31 @@ export async function createInviteLink(groupId) {
   if (USE_MOCK) {
     await mockDelay()
     const token = `mock-${groupId}-${Math.floor(performance.now())}`
-    return {
+    return normalizeInviteLink({
       token,
-      url: `${location.origin}/groups/join?token=${token}`,
       expiresAt: '24시간 뒤 만료',
-    }
+    })
   }
-  return apiPost(`/api/groups/${groupId}/invite-link`)
+  return normalizeInviteLink(await apiPost(`/api/groups/${groupId}/invite-link`))
+}
+
+export function normalizeInviteLink(link) {
+  if (!link) return null
+
+  const token = link.token ?? ''
+  const url = link.url || link.inviteUrl || buildInviteLinkUrl(token)
+
+  return {
+    ...link,
+    token,
+    url,
+  }
+}
+
+export function buildInviteLinkUrl(token) {
+  if (!token) return ''
+
+  return `${location.origin}/groups/join?token=${encodeURIComponent(token)}`
 }
 
 export async function joinByToken(token) {
