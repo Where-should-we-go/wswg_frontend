@@ -26,12 +26,14 @@ vi.mock('vue-router', () => ({
 const getTrip = vi.fn()
 const updateTrip = vi.fn(() => Promise.resolve({}))
 const deleteTrip = vi.fn(() => Promise.resolve(null))
-const uploadMedia = vi.fn(() => Promise.resolve({ url: '', mediaType: 'PHOTO', metadata: {} }))
+const uploadMedia = vi.fn(() =>
+  Promise.resolve({ mediaUrl: '', mediaType: 'PHOTO', metadata: {} }),
+)
 vi.mock('@/services/trips', () => ({
   getTrip: (id) => getTrip(id),
   updateTrip: (id, body) => updateTrip(id, body),
   deleteTrip: (id) => deleteTrip(id),
-  uploadMedia: (id, fd) => uploadMedia(id, fd),
+  uploadMedia: (id, blockId, file) => uploadMedia(id, blockId, file),
 }))
 
 const stubs = {
@@ -91,7 +93,7 @@ describe('S6 TripEditorView', () => {
   it('블록에서 사진을 올리면 uploadMedia 를 호출하고 media[] 에 더한다 (E1)', async () => {
     getTrip.mockResolvedValue(structuredClone(mockTrip))
     uploadMedia.mockClear()
-    uploadMedia.mockResolvedValue({ url: 'https://x/p.jpg', mediaType: 'PHOTO', metadata: {} })
+    uploadMedia.mockResolvedValue({ mediaUrl: 'https://x/p.jpg', mediaType: 'PHOTO', metadata: {} })
     const wrapper = factory()
     await flushPromises()
 
@@ -104,12 +106,37 @@ describe('S6 TripEditorView', () => {
     await flushPromises()
 
     expect(uploadMedia).toHaveBeenCalledTimes(1)
-    const [tripId, fd] = uploadMedia.mock.calls[0]
+    const [tripId, blockId, uploadedFile] = uploadMedia.mock.calls[0]
     expect(tripId).toBe(10)
-    expect(fd.get('blockId')).toBe('b-2')
-    expect(fd.get('mediaType')).toBe('PHOTO')
+    expect(blockId).toBe('b-2')
+    expect(uploadedFile).toBe(file)
     // media[] 에 append 되어 다시 렌더되었는지(prop 갱신).
     expect(target.props('block').media.at(-1).url).toBe('https://x/p.jpg')
+  })
+
+  it('오디오 파일을 올리면 AUDIO 미디어로 추가한다', async () => {
+    getTrip.mockResolvedValue(structuredClone(mockTrip))
+    uploadMedia.mockClear()
+    uploadMedia.mockResolvedValue({
+      mediaUrl: 'https://x/a.webm',
+      mediaType: 'AUDIO',
+      metadata: { originalFilename: 'a.webm' },
+    })
+    const wrapper = factory()
+    await flushPromises()
+
+    const blocks = wrapper.findAllComponents({ name: 'TripBlock' })
+    const target = blocks.find((b) => b.props('block').id === 'b-2')
+    const file = new File(['audio'], 'a.webm', { type: 'audio/webm' })
+    target.vm.$emit('upload-media', 'b-2', [file])
+    await flushPromises()
+
+    expect(uploadMedia).toHaveBeenCalledWith(10, 'b-2', file)
+    expect(target.props('block').media.at(-1)).toMatchObject({
+      type: 'AUDIO',
+      url: 'https://x/a.webm',
+      metadata: { originalFilename: 'a.webm' },
+    })
   })
 })
 

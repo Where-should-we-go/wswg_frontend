@@ -96,28 +96,37 @@ const uploading = reactive({})
 async function onUploadMedia(blockId, files) {
   for (const file of files) {
     uploading[blockId] = (uploading[blockId] ?? 0) + 1
-    const fd = new FormData()
-    const mediaType = file.type.startsWith('video/') ? 'VIDEO' : 'PHOTO'
-    fd.append('file', file)
-    fd.append('blockId', blockId)
-    fd.append('mediaType', mediaType)
+    const mediaType = mediaTypeOf(file)
     try {
-      const res = await uploadMedia(ed.trip.value.trip_id, fd)
+      const res = await uploadMedia(ed.trip.value.trip_id, blockId, file)
       // mock 은 빈 url 을 주므로, 미리보기 objectURL 로 폴백(흐름·UI 동작 우선).
-      const url = res?.url || URL.createObjectURL(file)
+      const url = res?.mediaUrl || res?.url || URL.createObjectURL(file)
       ed.addMedia(blockId, {
+        id: res?.mediaId,
         type: res?.mediaType ?? mediaType,
         url,
         metadata: res?.metadata ?? {},
       })
-      toast.success('추억이 더해졌어요')
+      toast.success(`${mediaLabel(mediaType)}을(를) 더했어요`)
     } catch {
-      toast.error('사진을 올리지 못했어요. 잠시 후 다시 시도해 주세요')
+      toast.error('파일을 올리지 못했어요. 잠시 후 다시 시도해 주세요')
     } finally {
       uploading[blockId] = Math.max(0, (uploading[blockId] ?? 1) - 1)
       if (uploading[blockId] === 0) delete uploading[blockId]
     }
   }
+}
+
+function mediaTypeOf(file) {
+  if (file?.type?.startsWith('video/')) return 'VIDEO'
+  if (file?.type?.startsWith('audio/')) return 'AUDIO'
+  return 'PHOTO'
+}
+
+function mediaLabel(mediaType) {
+  if (mediaType === 'VIDEO') return '동영상'
+  if (mediaType === 'AUDIO') return '녹음'
+  return '사진'
 }
 
 // 블록 추가(슬래시/+ 행). "관광지"는 검색 다이얼로그로, 나머지는 빈 블록 즉시 추가.

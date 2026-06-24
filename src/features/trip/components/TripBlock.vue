@@ -8,8 +8,8 @@
 //   업로드 중 스켈레톤 썸네일 표시, 완료되면 media[] 에 append.
 // 프레즌스: editor 있으면 옅은 배경(편집 중 표시) + CollabCaret.
 // ui/ 프리미티브 + blockMeta 헬퍼만 조합. 색은 토큰만.
-import { computed, ref, watch, onMounted } from 'vue'
-import { GripVertical, Plus, MoreVertical, ImagePlus } from '@lucide/vue'
+import { computed, ref, watch, onMounted, onBeforeUnmount } from 'vue'
+import { GripVertical, Plus, MoreVertical, ImagePlus, Mic, Square } from '@lucide/vue'
 import { BlockTag } from '@/components/ui/block-tag'
 import { PropertyPill } from '@/components/ui/property-pill'
 import { CollabCaret } from '@/components/ui/collab-caret'
@@ -48,6 +48,17 @@ const railColor = computed(() => railColorOf(props.block.type))
 const pills = computed(() => propertyPills(props.block.properties))
 const region = computed(() => regionOf(props.block.properties))
 const media = computed(() => props.block.media ?? [])
+const canRecordAudio = computed(
+  () =>
+    typeof navigator !== 'undefined' &&
+    !!navigator.mediaDevices?.getUserMedia &&
+    typeof MediaRecorder !== 'undefined',
+)
+const recording = ref(false)
+const recordError = ref('')
+let recorder = null
+let recordStream = null
+let recordChunks = []
 const isManual = computed(
   () => props.block.content_id === null || props.block.content_id === undefined,
 )
@@ -111,9 +122,78 @@ function onFilesPicked(e) {
 }
 function onDrop(e) {
   dropActive.value = false
-  const files = [...(e.dataTransfer?.files ?? [])].filter((f) => f.type.startsWith('image/') || f.type.startsWith('video/'))
+  const files = [...(e.dataTransfer?.files ?? [])].filter(isSupportedMediaFile)
   if (files.length) emit('upload-media', props.block.id, files)
 }
+
+function isSupportedMediaFile(file) {
+  return (
+    file.type.startsWith('image/') ||
+    file.type.startsWith('video/') ||
+    file.type.startsWith('audio/')
+  )
+}
+
+function mediaIcon(mediaItem) {
+  if (mediaItem.type === 'VIDEO') return '▶'
+  if (mediaItem.type === 'AUDIO') return '🎙'
+  return ''
+}
+
+function mediaLabel(mediaItem) {
+  if (mediaItem.type === 'VIDEO') return '동영상'
+  if (mediaItem.type === 'AUDIO') return '녹음'
+  return '사진'
+}
+
+async function toggleRecording() {
+  if (recording.value) {
+    recorder?.stop()
+    return
+  }
+
+  if (!canRecordAudio.value) {
+    recordError.value = '이 브라우저에서는 녹음을 사용할 수 없어요.'
+    return
+  }
+
+  recordError.value = ''
+  try {
+    recordStream = await navigator.mediaDevices.getUserMedia({ audio: true })
+    recordChunks = []
+    recorder = new MediaRecorder(recordStream)
+    recorder.ondataavailable = (event) => {
+      if (event.data?.size > 0) recordChunks.push(event.data)
+    }
+    recorder.onstop = () => {
+      const mimeType = recorder?.mimeType || 'audio/webm'
+      const file = new File([new Blob(recordChunks, { type: mimeType })], `recording-${Date.now()}.webm`, {
+        type: mimeType,
+      })
+      stopRecordStream()
+      recorder = null
+      recording.value = false
+      if (file.size > 0) emit('upload-media', props.block.id, [file])
+    }
+    recorder.start()
+    recording.value = true
+  } catch {
+    stopRecordStream()
+    recorder = null
+    recording.value = false
+    recordError.value = '마이크 권한을 확인해 주세요.'
+  }
+}
+
+function stopRecordStream() {
+  recordStream?.getTracks?.().forEach((track) => track.stop())
+  recordStream = null
+}
+
+onBeforeUnmount(() => {
+  if (recorder?.state === 'recording') recorder.stop()
+  stopRecordStream()
+})
 </script>
 
 <template>
@@ -216,13 +296,19 @@ function onDrop(e) {
           v-for="(m, i) in media"
           :key="i"
           class="relative h-12 w-16 overflow-hidden rounded-[7px] border border-[var(--border)] bg-[linear-gradient(135deg,#cfe0f5,#e7d9c6)]"
+          :aria-label="mediaLabel(m)"
         >
-          <img v-if="m.url" :src="m.url" alt="" class="h-full w-full object-cover" />
+          <img
+            v-if="m.url && m.type === 'PHOTO'"
+            :src="m.url"
+            alt=""
+            class="h-full w-full object-cover"
+          />
           <span
-            v-if="m.type === 'VIDEO'"
-            class="absolute inset-0 grid place-items-center text-[11px] text-white"
-            aria-label="동영상"
-            >▶</span
+            v-if="mediaIcon(m)"
+            class="absolute inset-0 grid place-items-center bg-black/25 text-[16px] text-white"
+            aria-hidden="true"
+            >{{ mediaIcon(m) }}</span
           >
         </div>
 
@@ -234,28 +320,46 @@ function onDrop(e) {
           aria-label="사진 올리는 중"
         />
 
-        <!-- ＋사진 버튼 (모바일=카메라/갤러리, 데스크탑=클릭 + 드롭존) -->
+        <!-- 파일 버튼 (사진·동영상·오디오, 데스크탑 드롭존 포함) -->
         <button
           v-if="!readonly"
           type="button"
           class="grid h-12 w-16 place-items-center rounded-[7px] border border-dashed border-[var(--border)] text-[var(--ink-3)] transition-colors hover:border-[var(--brand)] hover:text-[var(--brand)]"
-          :title="dropActive ? '여기에 놓아 주세요' : '사진 추가 (드래그앤드롭도 돼요)'"
-          aria-label="사진 추가"
+          :title="dropActive ? '여기에 놓아 주세요' : '파일 추가 (사진·동영상·오디오)'"
+          aria-label="파일 추가"
           @click="pickFiles"
         >
           <ImagePlus class="size-[18px]" />
         </button>
+        <button
+          v-if="!readonly"
+          type="button"
+          class="grid h-12 w-12 place-items-center rounded-[7px] border border-dashed border-[var(--border)] text-[var(--ink-3)] transition-colors hover:border-[var(--brand)] hover:text-[var(--brand)] disabled:cursor-not-allowed disabled:opacity-50"
+          :class="recording ? 'border-[var(--danger)] text-[var(--danger)]' : ''"
+          :disabled="!canRecordAudio"
+          :aria-label="recording ? '녹음 중지' : '녹음 시작'"
+          :title="recording ? '녹음 중지' : '녹음해서 올리기'"
+          @click="toggleRecording"
+        >
+          <Square v-if="recording" class="size-[15px] fill-current" />
+          <Mic v-else class="size-[17px]" />
+        </button>
         <span
           v-if="!readonly && !media.length && !uploadingCount"
           class="text-[11.5px] text-[var(--ink-3)]"
-          >＋ 사진</span
+          >사진·동영상·녹음</span
         >
+        <span v-if="recording" class="text-[11.5px] font-semibold text-[var(--danger)]">
+          녹음 중
+        </span>
+        <span v-else-if="recordError" class="text-[11.5px] text-[var(--danger)]">
+          {{ recordError }}
+        </span>
         <input
           v-if="!readonly"
           ref="fileInput"
           type="file"
-          accept="image/*,video/*"
-          capture="environment"
+          accept="image/*,video/*,audio/*"
           multiple
           class="hidden"
           @change="onFilesPicked"
