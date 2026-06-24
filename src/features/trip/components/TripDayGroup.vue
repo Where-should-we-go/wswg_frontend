@@ -124,7 +124,7 @@ const grouped = computed(() => {
             @open-menu="(blk) => emit('open-menu', blk)"
             @dragstart="(id) => emit('block-dragstart', id)"
             @dragend="emit('block-dragend')"
-            @reorder-drop="(id) => emit('reorder-drop', id)"
+            @reorder-drop="(id, pos) => emit('reorder-drop', id, pos)"
             @upload-media="(id, files) => emit('upload-media', id, files)"
           />
         </template>
@@ -145,7 +145,7 @@ const grouped = computed(() => {
           @open-menu="(blk) => emit('open-menu', blk)"
           @dragstart="(id) => emit('block-dragstart', id)"
           @dragend="emit('block-dragend')"
-          @reorder-drop="(id) => emit('reorder-drop', id)"
+          @reorder-drop="(id, pos) => emit('reorder-drop', id, pos)"
           @upload-media="(id, files) => emit('upload-media', id, files)"
         />
       </template>
