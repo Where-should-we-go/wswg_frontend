@@ -94,6 +94,31 @@ function onReorderDrop(targetId, pos = 'before') {
   ed.repackDay(drag.visitDate, ordered, dragId, target.time != null)
 }
 
+// 보드(칸반) 드롭: dragId 를 date 컬럼의 targetId 위/아래(또는 맨 끝)로 끼워넣는다.
+// 다른 날이면 먼저 그 날로 옮긴 뒤, 타임라인과 동일한 끌어넣기 시간 규칙(repackDay)을 적용한다.
+function onBoardDrop(dragId, date, targetId, pos) {
+  const drag = ed.findBlock(dragId)
+  if (!drag || dragId === targetId) return
+  if (drag.visitDate !== date) ed.moveBlockToDate(dragId, date) // 다른 컬럼 → 그 날로 이동(visitDate 커밋)
+  const day = ed.days.value.find((d) => d.date === date)
+  if (!day) return
+  const ordered = day.blocks.map((b) => b.id).filter((id) => id !== dragId)
+  let insertAt
+  let draggedTimed
+  if (targetId) {
+    const at = ordered.indexOf(targetId)
+    insertAt = at < 0 ? ordered.length : pos === 'after' ? at + 1 : at
+    const target = ed.findBlock(targetId)
+    draggedTimed = target ? target.time != null : drag.time != null
+  } else {
+    // 컬럼 빈 영역(맨 끝): 그 날에 시간 있는 블록이 있으면 시각 부여, 아니면 dragId 의 기존 상태.
+    insertAt = ordered.length
+    draggedTimed = ordered.some((id) => ed.findBlock(id)?.time != null) || drag.time != null
+  }
+  ordered.splice(insertAt, 0, dragId)
+  ed.repackDay(date, ordered, dragId, draggedTimed)
+}
+
 // ── 미디어 업로드(E1) — 블록당 업로드 중 카운트로 스켈레톤 표시 ──
 const uploading = reactive({})
 async function onUploadMedia(blockId, files) {
@@ -406,7 +431,7 @@ function syncLabel() {
       <template #board>
         <TripBoardView
           :days="ed.days.value"
-          @move-block="ed.moveBlockToDate"
+          @board-drop="onBoardDrop"
           @add-block="onAddBlock"
           @edit-title="(id, t) => ed.patchBlockLive(id, { title: t })"
         />
