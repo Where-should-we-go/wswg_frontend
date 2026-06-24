@@ -64,13 +64,14 @@ function commitTitle(value) {
   // 사이드바 '내 여행' 목록은 별도 출처라 저장 왕복 전엔 안 바뀜 → 공유 override 로 즉시 반영.
   setTripTitleOverride(ed.trip.value.trip_id, value)
 }
+// uncontrolled + 포커스 중 DOM 미갱신(watch 가드)이라 조합 중에 커밋해도 IME 가 안 끊긴다.
+// → 한글 조합 중에도 제목이 사이드바/모델에 라이브 반영(조합 완료까지 기다리지 않음).
 function onTitleInput(e) {
-  if (titleComposing.value) return
   commitTitle(e.target.value)
 }
 function onTitleCompositionEnd(e) {
   titleComposing.value = false
-  commitTitle(e.target.value)
+  commitTitle(e.target.value) // 최종 확정 보정
 }
 
 // 일정 뷰 보조 토글: 'rail' | 'calendar'

@@ -88,13 +88,14 @@ watch(
   },
 )
 
+// uncontrolled + 포커스 중 DOM 미갱신(watch 가드)이라 조합 중에 커밋해도 IME 가 안 끊긴다.
+// → 한글 조합 중에도 라이브 반영(조합 완료까지 기다리지 않음).
 function onTitleInput(e) {
-  if (composing.value) return // 한글 조합 중엔 커밋 보류
   emit('edit-title', props.block.id, e.target.value)
 }
 function onCompositionEnd(e) {
   composing.value = false
-  emit('edit-title', props.block.id, e.target.value)
+  emit('edit-title', props.block.id, e.target.value) // 최종 확정 보정
 }
 
 // ── 같은 날 순서 재배치(드래그핸들 ⋮⋮) ─────────────────────

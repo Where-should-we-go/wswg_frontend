@@ -26,13 +26,14 @@ watch(
   },
 )
 
+// uncontrolled + 포커스 중 DOM 미갱신(watch 가드)이라 조합 중에 커밋해도 IME 가 안 끊긴다.
+// → 한글 조합 중에도 모델값/협업/패널에 라이브 반영(조합 완료까지 기다리지 않음).
 function onInput(e) {
-  if (composing.value) return // 한글 조합 중엔 커밋 보류
   emit('commit', e.target.value)
 }
 function onCompositionEnd(e) {
   composing.value = false
-  emit('commit', e.target.value)
+  emit('commit', e.target.value) // 일부 브라우저의 최종 확정 보정
 }
 </script>
 
