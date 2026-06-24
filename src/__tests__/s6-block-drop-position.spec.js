@@ -48,4 +48,18 @@ describe('TripBlock — 드롭 위치(위/아래) 판정', () => {
     expect(wrapper.emitted('reorder-drop').at(-1)).toEqual(['b1', 'after'])
     wrapper.unmount()
   })
+
+  it('하단 미디어(＋사진) 영역 위로 블록을 끌어도 reorder 가 막히지 않는다(after 버블)', async () => {
+    const wrapper = mountBlock()
+    // ＋사진 영역(미디어 드롭존) 안의 요소에서 발생한 블록 드래그 이벤트도 블록으로 버블돼야 한다.
+    const photoBtn = wrapper.find('button[aria-label="파일 추가"]')
+    expect(photoBtn.exists()).toBe(true)
+    // dataTransfer 없는(=파일 아닌, 블록 reorder) 드래그 → 미디어존이 가로채지 않고 버블.
+    fire(photoBtn.element, 'dragover', 170) // 하단 → after
+    await nextTick()
+    fire(photoBtn.element, 'drop', 170)
+    await nextTick()
+    expect(wrapper.emitted('reorder-drop').at(-1)).toEqual(['b1', 'after'])
+    wrapper.unmount()
+  })
 })

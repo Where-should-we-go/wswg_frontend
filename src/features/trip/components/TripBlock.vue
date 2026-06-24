@@ -216,6 +216,24 @@ onBeforeUnmount(() => {
   if (recorder?.state === 'recording') recorder.stop()
   stopRecordStream()
 })
+
+// 미디어 드롭존은 "파일" 드래그일 때만 가로챈다(stop). 블록 reorder 드래그면 막지 않아
+// 이벤트가 블록으로 버블 → 블록 하단(=after 영역)에서도 순서/시간 끌어넣기가 동작한다.
+function isFileDrag(e) {
+  return !!e.dataTransfer && Array.from(e.dataTransfer.types || []).includes('Files')
+}
+function onMediaDragOver(e) {
+  if (props.readonly || !isFileDrag(e)) return
+  e.preventDefault()
+  e.stopPropagation()
+  dropActive.value = true
+}
+function onMediaDrop(e) {
+  if (props.readonly || !isFileDrag(e)) return
+  e.preventDefault()
+  e.stopPropagation()
+  onDrop(e)
+}
 </script>
 
 <template>
@@ -317,9 +335,9 @@ onBeforeUnmount(() => {
         v-if="!readonly || media.length"
         class="mt-[9px] flex flex-wrap items-center gap-1.5 rounded-[9px] transition-colors"
         :class="dropActive ? 'bg-[var(--brand-soft)] p-1.5 ring-1 ring-[var(--brand)]' : ''"
-        @dragover.prevent.stop="!readonly && (dropActive = true)"
-        @dragleave.stop="dropActive = false"
-        @drop.prevent.stop="!readonly && onDrop($event)"
+        @dragover="onMediaDragOver"
+        @dragleave="dropActive = false"
+        @drop="onMediaDrop"
       >
         <!-- 기존 미디어 -->
         <div
