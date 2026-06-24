@@ -71,6 +71,20 @@ export async function getCurrentUser() {
   return response.json()
 }
 
+// 앱 부팅 시 1회: refreshToken 쿠키로 accessToken 을 무음 재발급한다.
+// 새로고침/직접 URL 진입은 메모리의 accessToken 이 비어 있으므로, 가드가
+// 인증 여부를 판정하기 전에 이 완료를 기다려야 한다. 실패(미로그인)는 조용히 흡수.
+let bootstrapPromise = null
+export function ensureAuthReady() {
+  if (USE_MOCK || isLoggedOut() || getAccessToken()) {
+    return Promise.resolve()
+  }
+  if (!bootstrapPromise) {
+    bootstrapPromise = refreshAccessToken().catch(() => {})
+  }
+  return bootstrapPromise
+}
+
 // 라우터 가드용 동기 판정. mock 모드는 로그아웃 안 했으면 인증된 것으로 본다.
 export function isAuthenticated() {
   if (USE_MOCK) {

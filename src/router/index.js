@@ -1,6 +1,6 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import AppShell from '@/layouts/AppShell.vue'
-import { isAuthenticated, currentRole } from '@/services/auth'
+import { isAuthenticated, currentRole, ensureAuthReady } from '@/services/auth'
 
 // 화면정의서 §2.1 사이트맵. 두 종류의 셸:
 //  · 간소화(게스트 탐색) — GlobalHeader 를 화면이 직접 그림. S1·S2·S3·S4.
@@ -9,7 +9,7 @@ const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
   routes: [
     // ── 간소화 셸 (셸 레이아웃 없음) ──────────────────────────
-    { path: '/', name: 'home', component: () => import('@/views/HomeView.vue') }, // S1
+    { path: '/', name: 'landing', component: () => import('@/views/HomeView.vue') }, // S1
     { path: '/login', name: 'login', component: () => import('@/views/LoginView.vue') }, // S2
     {
       path: '/login/success',
@@ -82,12 +82,18 @@ const router = createRouter({
 })
 
 // 인증·권한 가드. mock 모드(USE_MOCK)는 isAuthenticated()가 기본 true → 화면 열람 가능.
-router.beforeEach((to) => {
+// 실모드는 부팅 무음 재발급(ensureAuthReady) 완료를 기다린 뒤 판정한다.
+router.beforeEach(async (to) => {
+  await ensureAuthReady()
+  // 로그인 사용자가 랜딩(/)에 직접 진입하면 마케팅 페이지를 건너뛰고 탐색 허브로.
+  if (to.name === 'landing' && isAuthenticated()) {
+    return { name: 'attractions' }
+  }
   if (to.meta?.requiresAuth && !isAuthenticated()) {
     return { name: 'login', query: { redirect: to.fullPath } }
   }
   if (to.meta?.requiresAdmin && currentRole() !== 'ADMIN') {
-    return { name: 'home' }
+    return { name: 'attractions' }
   }
   return true
 })
