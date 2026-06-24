@@ -1,10 +1,16 @@
-// useTripEditor — S6 편집 상태 + 낙관적 저장 컴포저블.
+// useTripEditor — S6 편집 상태 + 낙관적 저장 + 실시간 공동편집 컴포저블.
 // 로드한 trip 한 건을 로컬 반응 상태로 들고, 블록 조작(추가/수정/삭제/이동/순서)을
-// 즉시 로컬 반영(낙관적)한 뒤 debounce 로 updateTrip(전체 저장)을 호출한다.
-// 실시간(WS)은 mock 단계라 stub — 저장 성공/실패를 동기화 배지·토스트로만 보여준다.
-import { ref, computed } from 'vue'
+// 즉시 로컬 반영(낙관적)한다.
+//   · 실서버 모드(VITE_USE_MOCK=false) + 로그인: 각 편집을 WS op 로 송신하고
+//     다른 참가자의 broadcast 를 수신해 로컬에 병합한다. 영속은 서버 배치 워커가 담당.
+//   · mock/오프라인(소켓 미연결): debounce 로 updateTrip(전체 PUT) 폴백.
+import { ref, computed, onMounted, onBeforeUnmount, getCurrentInstance } from 'vue'
 import { updateTrip } from '@/services/trips'
 import { typeKeyOf } from '@/features/trip/lib/blockMeta'
+import { timeToMinutes, packSchedule } from '@/features/trip/lib/calendar'
+import { USE_MOCK } from '@/services/config'
+import * as authService from '@/services/auth'
+import { createPlanSocket, userIdFromToken } from '@/features/trip/lib/planSocket'
 
 // 새 블록 기본값(슬래시 메뉴 / + 버튼에서 추가).
 function blankBlock(koType, visitDate, order) {
@@ -22,6 +28,24 @@ function blankBlock(koType, visitDate, order) {
     media: [],
     properties: {},
   }
+}
+
+// 타임라인 정렬: 시간 있는 블록은 시각 오름차순(같으면 order), 시간 미정은 맨 뒤에서 order 순.
+// 일정은 시간 순서로 보여야 하므로, 시간 있는 블록끼리는 수동 order 가 아니라 time 으로 정렬한다.
+function compareForTimeline(a, b) {
+  const ta = a.time
+  const tb = b.time
+  if (ta && tb) return ta < tb ? -1 : ta > tb ? 1 : (a.order ?? 0) - (b.order ?? 0)
+  if (ta) return -1 // 시간 있는 블록을 시간 미정보다 앞에
+  if (tb) return 1
+  return (a.order ?? 0) - (b.order ?? 0) // 둘 다 시간 미정 → 수동 order
+}
+
+// TourAPI contentTypeId → 블록 한글 타입. 음식점=39, 숙박=32, 그 외는 관광.
+function koTypeForContentType(contentTypeId) {
+  if (contentTypeId === 39) return '식당'
+  if (contentTypeId === 32) return '숙소'
+  return '관광'
 }
 
 const PLACEHOLDER_BY_TYPE = {
@@ -49,9 +73,26 @@ export function useTripEditor(initialTrip) {
   const syncState = ref('synced')
   let saveTimer = null
 
+  // ── 실시간 공동편집(WS) 상태 ───────────────────────────────
+  // 실서버 모드 + 토큰 + trip_id 있을 때만 활성(mock·단위테스트에선 비활성).
+  const token =
+    !USE_MOCK && typeof authService.getAccessToken === 'function'
+      ? authService.getAccessToken()
+      : null
+  const myUserId = token ? userIdFromToken(token) : null
+  // 탭/기기별 고유 ID. 자기 echo 판별을 userId 가 아닌 이 값으로 한다
+  // (같은 계정으로 두 탭을 열어도 서로의 편집이 반영되도록).
+  const myClientId = `c-${Math.random().toString(36).slice(2)}-${Date.now().toString(36)}`
+  const realtimeEnabled =
+    !USE_MOCK && typeof WebSocket !== 'undefined' && !!token && !!trip.value?.trip_id
+  const realtimeReady = ref(false) // 소켓 open 여부(툴바 배지)
+  const presenceMap = ref({}) // { [memberId]: blockId } — 휘발성 프레즌스
+  let socket = null
+
   const items = computed(() => trip.value?.data?.items ?? [])
 
-  // visitDate 별 그룹 [{ date, dayIndex, blocks }] (order 정렬).
+  // visitDate 별 그룹 [{ date, dayIndex, blocks }].
+  // 시간 있는 블록은 시각 오름차순(일정은 시간 순서로 보여야 함), 시간 미정은 맨 뒤 수동 order 순.
   const days = computed(() => {
     const map = new Map()
     // 여행 기간 전체 날짜를 우선 채워 빈 Day 도 보이게 한다.
@@ -67,17 +108,30 @@ export function useTripEditor(initialTrip) {
       .map(([date, blocks], i) => ({
         date,
         dayIndex: i + 1,
-        blocks: [...blocks].sort((a, b) => (a.order ?? 0) - (b.order ?? 0)),
+        blocks: [...blocks].sort(compareForTimeline),
       }))
   })
 
-  // presence[] → { [blockId]: { name, color } } (편집 중 협업자).
+  // presence → { [blockId]: { name, color } } (편집 중 협업자, 나 자신은 제외).
+  // 실시간 모드는 presenceMap(WS), 그 외는 trip.presence(mock)를 본다.
   const editorsByBlock = computed(() => {
-    const byId = Object.fromEntries((trip.value?.members ?? []).map((m) => [m.id, m]))
+    const byId = Object.fromEntries((trip.value?.members ?? []).map((m) => [String(m.id), m]))
+    const entries = realtimeEnabled
+      ? Object.entries(presenceMap.value).map(([memberId, blockId]) => ({ memberId, blockId }))
+      : (trip.value?.presence ?? []).map((p) => ({
+          memberId: p.memberId,
+          blockId: p.blockId,
+          color: p.color,
+        }))
     const out = {}
-    for (const p of trip.value?.presence ?? []) {
-      const m = byId[p.memberId]
-      if (m) out[p.blockId] = { name: m.name, color: p.color ?? m.color }
+    for (const p of entries) {
+      if (myUserId && String(p.memberId) === myUserId) continue
+      if (!p.blockId) continue
+      const m = byId[String(p.memberId)]
+      out[p.blockId] = {
+        name: m?.name ?? `사용자 ${p.memberId}`,
+        color: p.color ?? m?.color ?? 'var(--collab-1)',
+      }
     }
     return out
   })
@@ -108,6 +162,159 @@ export function useTripEditor(initialTrip) {
     }
   }
 
+  // ── 실시간 송신/수신 ───────────────────────────────────────
+  // op 를 WS 로 송신(성공 시 true). 영속은 서버 배치 워커가 담당하므로 PUT 생략.
+  // 소켓 미연결이면 false → 호출부가 scheduleSave(PUT)로 폴백.
+  function sendOp(type, payload) {
+    // payload 에 clientId 를 실어 보낸다(서버가 block/meta op 의 payload 를 그대로 echo →
+    // 수신 측에서 자기 탭이 보낸 것인지 판별). block 안이 아니라 payload 최상위에 둠.
+    const withCid = { ...(payload ?? {}), clientId: myClientId }
+    if (socket && socket.send({ type, tripId: trip.value.trip_id, payload: withCid })) {
+      syncState.value = 'saving' // 서버 ack 수신 시 synced
+      return true
+    }
+    return false
+  }
+
+  // 블록 편집 1건: 실시간이면 op 송신 + 편집 중 프레즌스 알림, 아니면 PUT 폴백.
+  function commitEdit(type, payload, blockId) {
+    const sent = sendOp(type, payload)
+    if (sent) {
+      if (blockId) sendOp('presence', { blockId })
+    } else {
+      scheduleSave()
+    }
+  }
+
+  // 텍스트 라이브 입력(노션식)용 — 로컬은 키 입력마다 즉시 반영하되, WS op·PUT 은
+  // 디바운스로 모아 보낸다(키마다 송신 시 트래픽 폭증·상대 커서 덮어쓰기 방지).
+  const liveTimers = new Map()
+  const livePatches = new Map()
+  function patchBlockLive(id, patch) {
+    const b = findBlock(id)
+    if (!b) return
+    Object.assign(b, patch) // 로컬 즉시(캘린더·보드 등 다른 뷰도 함께 갱신)
+    const merged = { ...(livePatches.get(id) ?? {}), ...patch }
+    livePatches.set(id, merged)
+    clearTimeout(liveTimers.get(id))
+    liveTimers.set(
+      id,
+      setTimeout(() => {
+        const p = livePatches.get(id) ?? {}
+        livePatches.delete(id)
+        liveTimers.delete(id)
+        commitEdit('block.update', { id, patch: p }, id)
+      }, 300),
+    )
+  }
+
+  // 문서 제목 라이브 입력용 디바운스 meta.update 송신.
+  let metaTimer = null
+  let metaPatch = {}
+  function scheduleMetaSend(patch) {
+    metaPatch = { ...metaPatch, ...patch }
+    clearTimeout(metaTimer)
+    metaTimer = setTimeout(() => {
+      const p = metaPatch
+      metaPatch = {}
+      sendOp('meta.update', { patch: p })
+    }, 300)
+  }
+
+  // 서버 block.update patch 병합 규칙과 동일(얕은 병합 + properties 키단위 + media 통째).
+  function applyPatch(block, patch) {
+    for (const [key, value] of Object.entries(patch ?? {})) {
+      if (key === 'properties') {
+        if (value == null) {
+          block.properties = {}
+          continue
+        }
+        const props = { ...(block.properties ?? {}) }
+        for (const [pk, pv] of Object.entries(value)) {
+          if (pv === null || pv === '' || (typeof pv === 'string' && !pv.trim())) delete props[pk]
+          else props[pk] = pv
+        }
+        block.properties = props
+      } else {
+        block[key] = value
+      }
+    }
+  }
+
+  // 서버에서 온 메시지를 로컬 상태에 반영.
+  function applyRemote(msg) {
+    const type = msg?.type
+    if (type === 'sync') {
+      const data = msg.payload?.data
+      if (data && typeof data === 'object') {
+        if (!Array.isArray(data.items)) data.items = []
+        trip.value.data = data
+      }
+      const next = {}
+      for (const p of msg.payload?.presence ?? []) {
+        const mid = String(p.memberId ?? '')
+        if (mid && p.blockId) next[mid] = p.blockId
+      }
+      presenceMap.value = next
+      realtimeReady.value = true
+      syncState.value = 'synced'
+      return
+    }
+    if (type === 'ack') {
+      syncState.value = 'synced'
+      return
+    }
+    if (type === 'error') {
+      syncState.value = 'error'
+      return
+    }
+    if (type === 'presence') {
+      const mid = String(msg.actor?.userId ?? '')
+      if (!mid) return
+      const blockId = msg.payload?.blockId ?? null
+      const next = { ...presenceMap.value }
+      if (blockId) next[mid] = blockId
+      else delete next[mid]
+      presenceMap.value = next
+      return
+    }
+    // block.* / meta.update — 이 탭이 보낸 echo 만 건너뜀(같은 계정의 다른 탭/기기는 반영).
+    if (msg.payload?.clientId && msg.payload.clientId === myClientId) return
+    if (type === 'block.add') {
+      const block = msg.payload?.block ?? msg.payload
+      if (block?.id && !findBlock(block.id)) trip.value.data.items.push(block)
+    } else if (type === 'block.update') {
+      const b = findBlock(msg.payload?.id)
+      if (b) applyPatch(b, msg.payload?.patch)
+    } else if (type === 'block.remove') {
+      const idx = items.value.findIndex((b) => b.id === msg.payload?.id)
+      if (idx >= 0) trip.value.data.items.splice(idx, 1)
+    } else if (type === 'meta.update') {
+      const patch = msg.payload?.patch ?? {}
+      if ('title' in patch) trip.value.title = patch.title
+      trip.value.data.meta = { ...(trip.value.data.meta ?? {}), ...patch }
+    }
+  }
+
+  // 실시간 연결 수립/해제(컴포넌트 setup 안에서만).
+  if (realtimeEnabled && getCurrentInstance()) {
+    onMounted(() => {
+      socket = createPlanSocket({
+        tripId: trip.value.trip_id,
+        token,
+        onMessage: applyRemote,
+        onStatus: (s) => {
+          if (s === 'open') realtimeReady.value = true
+          else if (s === 'closed' || s === 'error') realtimeReady.value = false
+        },
+      })
+    })
+    onBeforeUnmount(() => {
+      socket?.close()
+      socket = null
+    })
+  }
+
   // ── 블록 조작(모두 낙관적) ─────────────────────────────────
   function findBlock(id) {
     return items.value.find((b) => b.id === id) ?? null
@@ -117,18 +324,20 @@ export function useTripEditor(initialTrip) {
     const b = findBlock(id)
     if (!b) return
     Object.assign(b, patch)
-    scheduleSave()
+    commitEdit('block.update', { id, patch }, id)
   }
 
   function patchProperty(id, key, value) {
     const b = findBlock(id)
     if (!b) return
-    if (value === '' || value === null || value === undefined) {
+    const empty = value === '' || value === null || value === undefined
+    if (empty) {
       delete b.properties[key]
     } else {
       b.properties = { ...b.properties, [key]: value }
     }
-    scheduleSave()
+    // 서버 규약: properties 내부 값이 null/'' 이면 그 키 삭제.
+    commitEdit('block.update', { id, patch: { properties: { [key]: empty ? null : value } } }, id)
   }
 
   function addBlock(koType, visitDate) {
@@ -136,7 +345,29 @@ export function useTripEditor(initialTrip) {
     const maxOrder = sameDay.reduce((m, b) => Math.max(m, b.order ?? 0), 0)
     const block = blankBlock(koType, visitDate, maxOrder + 1)
     trip.value.data.items.push(block)
-    scheduleSave()
+    commitEdit('block.add', { block }, block.id)
+    return block
+  }
+
+  // 검색한 관광지(Attraction)를 블록으로 추가. content_id·좌표·지역·대표사진을 채운다.
+  function addPlaceBlock(place, visitDate) {
+    if (!place) return null
+    const sameDay = items.value.filter((b) => b.visitDate === visitDate)
+    const maxOrder = sameDay.reduce((m, b) => Math.max(m, b.order ?? 0), 0)
+    const block = blankBlock(koTypeForContentType(place.contentTypeId), visitDate, maxOrder + 1)
+    block.content_id = place.contentId ?? null
+    block.title = place.title ?? ''
+    // 실서버 상세는 latitude/longitude, mock 은 mapY/mapX 를 쓴다(둘 다 수용).
+    block.lat = place.latitude ?? place.mapY ?? null
+    block.lng = place.longitude ?? place.mapX ?? null
+    if (place.firstImage1) block.media = [{ type: 'PHOTO', url: place.firstImage1, metadata: {} }]
+    const region = [place.sidoName, place.gugunName].filter(Boolean).join(' ')
+    block.properties = {
+      ...(region ? { region } : {}),
+      ...(place.addr1 ? { address: place.addr1 } : {}),
+    }
+    trip.value.data.items.push(block)
+    commitEdit('block.add', { block }, block.id)
     return block
   }
 
@@ -144,7 +375,7 @@ export function useTripEditor(initialTrip) {
     const idx = items.value.findIndex((b) => b.id === id)
     if (idx >= 0) {
       trip.value.data.items.splice(idx, 1)
-      scheduleSave()
+      commitEdit('block.remove', { id })
     }
   }
 
@@ -156,16 +387,84 @@ export function useTripEditor(initialTrip) {
     const maxOrder = sameDay.reduce((m, x) => Math.max(m, x.order ?? 0), 0)
     b.visitDate = newDate
     b.order = maxOrder + 1
-    scheduleSave()
+    commitEdit('block.update', { id, patch: { visitDate: newDate, order: b.order } }, id)
+  }
+
+  // 캘린더 드래그로 일정 조율 — time·소요시간·일차를 한 번에 변경(block.update 1건).
+  // 일차가 바뀌면 새 날 끝으로 order 도 같이 옮긴다(레일 뷰 정렬 일관성).
+  function setBlockSchedule(id, patch) {
+    const b = findBlock(id)
+    if (!b) return
+    const next = {}
+    if ('time' in patch) next.time = patch.time
+    if ('durationMin' in patch) next.durationMin = patch.durationMin
+    if (patch.visitDate && patch.visitDate !== b.visitDate) {
+      next.visitDate = patch.visitDate
+      const sameDay = items.value.filter((x) => x.visitDate === patch.visitDate)
+      next.order = sameDay.reduce((m, x) => Math.max(m, x.order ?? 0), 0) + 1
+    }
+    if (Object.keys(next).length === 0) return
+    Object.assign(b, next)
+    commitEdit('block.update', { id, patch: next }, id)
+  }
+
+  // WS op(있으면) / PUT 폴백 — 프레즌스 없이 조용히 보냄(재패킹은 블록 여럿 갱신).
+  function pushUpdate(id, patch) {
+    if (!sendOp('block.update', { id, patch })) scheduleSave()
+  }
+
+  // 순차 재패킹 — 순서(orderedIds)대로 시간 있는 블록을 겹침 없이 이어 배치하고,
+  // 시간 미정 블록은 맨 뒤 수동 order 로 둔다. overrides[id]=true/false 로 시간 부여/해제(양방향).
+  //   앵커 = 그 날의 가장 이른 기존 시각(없으면 09:00) → 하루 시작 시각은 유지.
+  function repackDay(date, orderedIds, overrides = {}) {
+    const blocks = orderedIds.map((id) => findBlock(id)).filter((b) => b && b.visitDate === date)
+    const timed = []
+    const untimed = []
+    for (const b of blocks) {
+      const isTimed = b.id in overrides ? overrides[b.id] : b.time != null
+      ;(isTimed ? timed : untimed).push(b)
+    }
+    let anchorMin = null
+    for (const b of timed) {
+      const t = timeToMinutes(b.time)
+      if (t != null) anchorMin = anchorMin == null ? t : Math.min(anchorMin, t)
+    }
+    if (anchorMin == null) anchorMin = 9 * 60
+    const timeById = Object.fromEntries(
+      packSchedule(timed, { anchorMin }).map((p) => [p.id, p.time]),
+    )
+    for (const b of timed) {
+      const nt = timeById[b.id]
+      if (b.time !== nt) {
+        b.time = nt
+        pushUpdate(b.id, { time: nt })
+      }
+    }
+    untimed.forEach((b, i) => {
+      const patch = {}
+      if (b.time != null) {
+        b.time = null
+        patch.time = null
+      }
+      if ((b.order ?? 0) !== i + 1) {
+        b.order = i + 1
+        patch.order = i + 1
+      }
+      if (Object.keys(patch).length) pushUpdate(b.id, patch)
+    })
   }
 
   // 같은 날 안에서 순서 재배치(롱프레스/드래그). orderedIds = 새 순서의 블록 id[].
   function reorderWithin(date, orderedIds) {
+    let sent = false
     orderedIds.forEach((id, i) => {
       const b = findBlock(id)
-      if (b && b.visitDate === date) b.order = i + 1
+      if (b && b.visitDate === date) {
+        b.order = i + 1
+        if (sendOp('block.update', { id, patch: { order: b.order } })) sent = true
+      }
     })
-    scheduleSave()
+    if (!sent) scheduleSave()
   }
 
   // 미디어 append(E1 업로드). 업로드된 { type, url, metadata } 를 블록 media[] 끝에 더한다.
@@ -174,7 +473,8 @@ export function useTripEditor(initialTrip) {
     if (!b) return
     if (!Array.isArray(b.media)) b.media = []
     b.media.push(media)
-    scheduleSave()
+    // media 는 통째 교체 규약 → 현재 배열 전체를 patch.media 로 전송.
+    commitEdit('block.update', { id: blockId, patch: { media: b.media } }, blockId)
   }
 
   // 대표 미디어 선정(갤러리). 한 블록의 한 미디어를 대표로 표시.
@@ -185,12 +485,15 @@ export function useTripEditor(initialTrip) {
     const b = findBlock(blockId)
     if (b && b.media?.[mediaIndex]) {
       b.media[mediaIndex].representative = true
-      scheduleSave()
+      commitEdit('block.update', { id: blockId, patch: { media: b.media } }, blockId)
     }
   }
 
   function setTitle(title) {
     trip.value.title = title
+    // 제목은 trips 컬럼이라 배치 워커가 영속하지 않음 → 실시간 echo(meta.update, 디바운스) +
+    // 컬럼 영속을 위한 PUT(debounce) 둘 다 수행.
+    scheduleMetaSend({ title })
     scheduleSave()
   }
 
@@ -201,14 +504,20 @@ export function useTripEditor(initialTrip) {
     editorsByBlock,
     isEmpty,
     syncState,
+    realtimeEnabled,
+    realtimeReady,
     flush,
     typeKeyOf,
     findBlock,
     patchBlock,
+    patchBlockLive,
     patchProperty,
     addBlock,
+    addPlaceBlock,
     removeBlock,
     moveBlockToDate,
+    setBlockSchedule,
+    repackDay,
     reorderWithin,
     addMedia,
     setRepresentative,

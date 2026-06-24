@@ -5,15 +5,18 @@
 // 핀 클릭/호버 → 블록 제목 라벨. 좌표 있는 블록 없으면 빈 상태.
 import { computed, ref } from 'vue'
 import EmptyState from '@/components/common/EmptyState.vue'
+import AddBlockRow from './AddBlockRow.vue'
 import { typeEmojiOf, railColorOf } from '@/features/trip/lib/blockMeta'
 
 const props = defineProps({
   items: { type: Array, default: () => [] },
+  // 지도에서 추가할 때 들어갈 기본 일차(보통 Day 1).
+  defaultDate: { type: String, default: null },
 })
 
-const pinned = computed(() =>
-  props.items.filter((b) => b.lat != null && b.lng != null),
-)
+const emit = defineEmits(['add-block'])
+
+const pinned = computed(() => props.items.filter((b) => b.lat != null && b.lng != null))
 
 // bounding box → 0~1 비율 좌표(여백 8%). 핀 1개면 중앙.
 const layout = computed(() => {
@@ -104,8 +107,11 @@ const active = ref(null)
       </button>
     </div>
 
-    <p class="mt-2 text-[12px] text-[var(--ink-3)]">
+    <p v-if="layout.length" class="mt-2 text-[12px] text-[var(--ink-3)]">
       위치가 있는 {{ layout.length }}개 장소를 방문 순서대로 이어 보여줘요.
     </p>
+
+    <!-- 블록 추가(관광지 검색 등) — Day 1 로 들어가고, 이후 다른 뷰에서 옮길 수 있어요. -->
+    <AddBlockRow variant="plain" class="mt-3" @add="(t) => emit('add-block', t, defaultDate)" />
   </div>
 </template>

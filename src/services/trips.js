@@ -1,9 +1,36 @@
 // 여행 문서 도메인 (S5 자동생성 · S6 편집 · S4 추가 · S7 카드).
 import { apiGet, apiPost, apiPut, apiDelete, apiUpload } from './api'
 import { USE_MOCK, mockDelay, toQuery } from './config'
+import { getGroupMembers } from './groups'
 import * as db from './mock/db'
 
 let mockTripSeq = 100
+
+// 실제 백엔드 TripDto(camelCase) → FE 컴포넌트가 기대하는 표현용 shape(snake_case + 메타).
+// 백엔드는 컬럼 + data(JSONB)만 영속하므로 cover/icon/region/styles 등 페이지 메타는
+// data.meta 하위에서 읽고(없으면 기본값), members/presence 는 휘발성이라 별도 채운다.
+function adaptTrip(dto, members) {
+  const data = dto?.data && typeof dto.data === 'object' ? { ...dto.data } : { items: [] }
+  if (!Array.isArray(data.items)) data.items = []
+  const meta = data.meta && typeof data.meta === 'object' ? data.meta : {}
+  return {
+    trip_id: dto.tripId,
+    title: dto.title ?? '',
+    start_date: dto.startDate ?? null,
+    end_date: dto.endDate ?? null,
+    user_id: dto.userId ?? null,
+    group_id: dto.groupId ?? null,
+    groupName: dto.groupName ?? null,
+    cover: meta.cover ?? null,
+    icon: meta.icon ?? (dto.groupId ? '🧳' : '🗺️'),
+    region: meta.region ?? null,
+    budgetLabel: meta.budgetLabel ?? '',
+    styles: meta.styles ?? [],
+    members: members ?? [],
+    presence: [],
+    data,
+  }
+}
 
 // ── 조회 (S6) ────────────────────────────────────────────────
 export async function getTrip(tripId) {
@@ -18,7 +45,13 @@ export async function getTrip(tripId) {
     // 깊은 복사로 반환(외부 변이 방지). 저장은 updateTrip 으로만.
     return structuredClone(trip)
   }
-  return apiGet(`/api/trips/${tripId}`)
+  const dto = await apiGet(`/api/trips/${tripId}`)
+  // 그룹 여행이면 멤버를 합성(아바타·프레즌스 출처). 멤버 조회 실패는 무시(빈 배열).
+  let members = []
+  if (dto?.groupId) {
+    members = await getGroupMembers(dto.groupId).catch(() => [])
+  }
+  return adaptTrip(dto, members)
 }
 
 // ── 전체 갱신 (S6 PUT, S4 추가) ──────────────────────────────

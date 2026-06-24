@@ -24,6 +24,34 @@ export async function getGroup(groupId) {
   return apiGet(`/api/groups/${groupId}`)
 }
 
+// 그룹 멤버 목록 (S6 공동편집 아바타·프레즌스 출처). GroupMemberDto[] →
+// FE 표현용 멤버 { id, userId, name, initial, color, profileImageUrl, role }.
+export async function getGroupMembers(groupId) {
+  if (USE_MOCK) {
+    await mockDelay(150)
+    const g = db.GROUPS.find((x) => x.groupId === Number(groupId))
+    return (g?.members ?? []).map((m, i) =>
+      toMember(m.userId ?? m.id, m.name, m.profileImageUrl, m.role === 'OWNER', i),
+    )
+  }
+  const rows = await apiGet(`/api/groups/${groupId}/members`)
+  return (rows ?? []).map((m, i) => toMember(m.userId, m.name, m.profileImageUrl, m.owner, i))
+}
+
+// 멤버 1명 → FE 표현용. 협업 카렛 색은 collab-1/2/3 토큰을 순환 배정.
+function toMember(userId, name, profileImageUrl, owner, index) {
+  const label = name ?? `사용자 ${userId}`
+  return {
+    id: String(userId),
+    userId,
+    name: label,
+    initial: label.slice(0, 1),
+    color: `var(--collab-${(index % 3) + 1})`,
+    profileImageUrl: profileImageUrl ?? '',
+    role: owner ? 'OWNER' : 'MEMBER',
+  }
+}
+
 export async function createGroup(groupName) {
   if (USE_MOCK) {
     await mockDelay()

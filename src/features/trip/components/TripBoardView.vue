@@ -5,6 +5,8 @@
 // 네이티브 HTML5 드래그앤드롭(라이브러리 미사용).
 import { ref } from 'vue'
 import { BlockTag } from '@/components/ui/block-tag'
+import AddBlockRow from './AddBlockRow.vue'
+import BlockTitleInput from './BlockTitleInput.vue'
 import { typeKeyOf, typeEmojiOf, overlineOf } from '@/features/trip/lib/blockMeta'
 
 defineProps({
@@ -12,7 +14,10 @@ defineProps({
   days: { type: Array, default: () => [] },
 })
 
-const emit = defineEmits(['move-block'])
+const emit = defineEmits(['move-block', 'add-block', 'edit-title'])
+
+// 제목 편집 중인 카드 — 그 동안은 드래그를 끈다(입력과 충돌 방지).
+const editingId = ref(null)
 
 const WEEKDAYS = ['일', '월', '화', '수', '목', '금', '토']
 function dateLabel(date) {
@@ -68,17 +73,26 @@ function onDrop(date) {
           <div
             v-for="b in d.blocks"
             :key="b.id"
-            draggable="true"
-            class="cursor-grab rounded-[var(--radius)] border border-[var(--border)] bg-[var(--background)] p-2.5 shadow-[0_1px_2px_rgba(0,0,0,0.04)] active:cursor-grabbing"
-            :class="draggingId === b.id ? 'opacity-40' : ''"
+            :draggable="editingId !== b.id"
+            class="rounded-[var(--radius)] border border-[var(--border)] bg-[var(--background)] p-2.5 shadow-[0_1px_2px_rgba(0,0,0,0.04)]"
+            :class="[
+              draggingId === b.id ? 'opacity-40' : '',
+              editingId === b.id ? '' : 'cursor-grab active:cursor-grabbing',
+            ]"
             @dragstart="onDragStart(b)"
             @dragend="onDragEnd"
           >
             <div class="flex items-start gap-1.5">
               <span aria-hidden="true">{{ typeEmojiOf(b.type) }}</span>
-              <span class="min-w-0 flex-1 text-[13.5px] font-medium leading-[1.35]">{{
-                b.title || '제목 없는 블록'
-              }}</span>
+              <!-- 제목 인라인 편집(빈 메모·이동도 바로 작성) -->
+              <BlockTitleInput
+                :value="b.title"
+                placeholder="제목 없는 블록"
+                class="min-w-0 flex-1 text-[13.5px] font-medium leading-[1.35]"
+                @commit="(t) => emit('edit-title', b.id, t)"
+                @focus="editingId = b.id"
+                @blur="editingId = null"
+              />
             </div>
             <div class="mt-1.5 flex items-center gap-2">
               <BlockTag :type="typeKeyOf(b.type)" class="px-[6px] py-px text-[10px]" />
@@ -95,6 +109,9 @@ function onDrop(date) {
           >
             여기로 끌어다 놓아요
           </p>
+
+          <!-- 블록 추가 (슬래시 메뉴는 body 로 Teleport — 잘림 방지) -->
+          <AddBlockRow variant="plain" @add="(t) => emit('add-block', t, d.date)" />
         </div>
       </div>
     </div>
