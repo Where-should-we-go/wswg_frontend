@@ -178,4 +178,25 @@ describe('useTripEditor — 블록 편집 액션 (D4·E1·순서)', () => {
     expect(ed.findBlock('b-1').order).toBe(2)
     expect(ed.findBlock('b-4').order).toBe(4)
   })
+
+  // 끌어넣기(insert-between): 옮긴 블록만 새 위치 시간, 나머지는 보존, 겹칠 때만 뒤로 밀기.
+  it('repackDay: 블록을 이웃 사이로 끌어넣으면 그 자리 시간만 갖고 멀리 있는 블록은 보존', () => {
+    const ed = makeEd()
+    // 1일차: b-1 10:00(60) · b-2 12:30(60) · b-3 15:00(120) · b-4 19:00.
+    // b-3 을 b-1 과 b-2 사이로.
+    ed.repackDay('2026-07-01', ['b-1', 'b-3', 'b-2', 'b-4'], 'b-3', true)
+    expect(ed.findBlock('b-1').time).toBe('10:00') // 앞쪽 보존
+    expect(ed.findBlock('b-3').time).toBe('11:00') // b-1 끝(11:00)에 끼워짐
+    expect(ed.findBlock('b-2').time).toBe('13:00') // 겹쳐서 뒤로 밀림(12:30→13:00)
+    expect(ed.findBlock('b-4').time).toBe('19:00') // 멀리 떨어진 블록은 그대로(전체 재패킹 아님)
+  })
+
+  it('repackDay: 맨 끝으로 끌어넣으면 마지막 블록 뒤에 붙고 나머지는 그대로', () => {
+    const ed = makeEd()
+    ed.repackDay('2026-07-01', ['b-2', 'b-3', 'b-4', 'b-1'], 'b-1', true)
+    expect(ed.findBlock('b-2').time).toBe('12:30')
+    expect(ed.findBlock('b-3').time).toBe('15:00')
+    expect(ed.findBlock('b-4').time).toBe('19:00')
+    expect(ed.findBlock('b-1').time).toBe('20:00') // b-4(19:00) + 60분
+  })
 })

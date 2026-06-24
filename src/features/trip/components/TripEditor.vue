@@ -90,7 +90,8 @@ function onReorderDrop(targetId, pos = 'before') {
   const at = ordered.indexOf(targetId)
   const insertAt = at < 0 ? ordered.length : pos === 'after' ? at + 1 : at
   ordered.splice(insertAt, 0, dragId)
-  ed.repackDay(drag.visitDate, ordered, { [dragId]: target.time != null })
+  // 끌어넣기: 옮긴 블록만 새 위치 시간으로, 나머지 시간은 보존. 시각 유무는 대상 블록을 따른다.
+  ed.repackDay(drag.visitDate, ordered, dragId, target.time != null)
 }
 
 // ── 미디어 업로드(E1) — 블록당 업로드 중 카운트로 스켈레톤 표시 ──

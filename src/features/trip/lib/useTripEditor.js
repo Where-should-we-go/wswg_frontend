@@ -7,7 +7,7 @@
 import { ref, computed, onMounted, onBeforeUnmount, getCurrentInstance } from 'vue'
 import { updateTrip } from '@/services/trips'
 import { typeKeyOf } from '@/features/trip/lib/blockMeta'
-import { timeToMinutes, packSchedule } from '@/features/trip/lib/calendar'
+import { timeToMinutes, minutesToTime, DEFAULT_DURATION_MIN } from '@/features/trip/lib/calendar'
 import { USE_MOCK } from '@/services/config'
 import * as authService from '@/services/auth'
 import { createPlanSocket, userIdFromToken } from '@/features/trip/lib/planSocket'
@@ -416,39 +416,60 @@ export function useTripEditor(initialTrip) {
   // 순차 재패킹 — 순서(orderedIds)대로 시간 있는 블록을 겹침 없이 이어 배치하고,
   // 시간 미정 블록은 맨 뒤 수동 order 로 둔다. overrides[id]=true/false 로 시간 부여/해제(양방향).
   //   앵커 = 그 날의 가장 이른 기존 시각(없으면 09:00) → 하루 시작 시각은 유지.
-  function repackDay(date, orderedIds, overrides = {}) {
+  // 끌어넣기(insert-between): 옮긴 블록만 새 이웃 사이 시간으로 두고 나머지 시간은 보존한다.
+  // 앞 블록이 있으면 그 끝에 붙이고, 없으면 다음 블록 직전에 둔다. 겹치면 그 뒤만 밀어낸다(cascade).
+  // draggedTimed: 드롭 지점이 시간 있는 블록 옆이면 true(시각 부여), 미정 영역이면 false(시각 해제).
+  function repackDay(date, orderedIds, draggedId, draggedTimed) {
     const blocks = orderedIds.map((id) => findBlock(id)).filter((b) => b && b.visitDate === date)
-    const timed = []
-    const untimed = []
-    for (const b of blocks) {
-      const isTimed = b.id in overrides ? overrides[b.id] : b.time != null
-      ;(isTimed ? timed : untimed).push(b)
-    }
-    let anchorMin = null
-    for (const b of timed) {
-      const t = timeToMinutes(b.time)
-      if (t != null) anchorMin = anchorMin == null ? t : Math.min(anchorMin, t)
-    }
-    if (anchorMin == null) anchorMin = 9 * 60
-    const timeById = Object.fromEntries(
-      packSchedule(timed, { anchorMin }).map((p) => [p.id, p.time]),
-    )
-    for (const b of timed) {
-      const nt = timeById[b.id]
-      if (b.time !== nt) {
-        b.time = nt
-        pushUpdate(b.id, { time: nt })
+    const isTimed = (b) => (b.id === draggedId ? draggedTimed : b.time != null)
+    const timed = blocks.filter(isTimed)
+    const untimed = blocks.filter((b) => !isTimed(b))
+    const dur = (b) =>
+      b.durationMin != null && Number(b.durationMin) > 0 ? Number(b.durationMin) : DEFAULT_DURATION_MIN
+
+    const i = timed.findIndex((b) => b.id === draggedId)
+    if (i !== -1) {
+      // 옮긴 블록의 시작 시각: 앞 블록 끝 → 없으면 다음 블록 직전 → 둘 다 없으면 기존/09:00.
+      const prev = i > 0 ? timed[i - 1] : null
+      const next = i < timed.length - 1 ? timed[i + 1] : null
+      let draggedStart
+      if (prev && timeToMinutes(prev.time) != null) {
+        draggedStart = timeToMinutes(prev.time) + dur(prev)
+      } else if (next && timeToMinutes(next.time) != null) {
+        draggedStart = Math.max(0, timeToMinutes(next.time) - dur(timed[i]))
+      } else {
+        draggedStart = timeToMinutes(timed[i].time) ?? 9 * 60
       }
+      // 앞쪽 블록은 시간 보존, 옮긴 지점부터는 겹칠 때만 뒤로 밀기(cascade).
+      let cursor = -1
+      timed.forEach((b, j) => {
+        let start
+        if (j < i) {
+          start = timeToMinutes(b.time) ?? Math.max(0, cursor)
+        } else if (j === i) {
+          start = Math.max(draggedStart, cursor < 0 ? draggedStart : cursor)
+        } else {
+          const existing = timeToMinutes(b.time)
+          start = existing != null ? Math.max(existing, cursor) : Math.max(0, cursor)
+        }
+        const nt = minutesToTime(Math.min(start, 1439))
+        if (b.time !== nt) {
+          b.time = nt
+          pushUpdate(b.id, { time: nt })
+        }
+        cursor = start + dur(b)
+      })
     }
-    untimed.forEach((b, i) => {
+
+    untimed.forEach((b, idx) => {
       const patch = {}
       if (b.time != null) {
         b.time = null
         patch.time = null
       }
-      if ((b.order ?? 0) !== i + 1) {
-        b.order = i + 1
-        patch.order = i + 1
+      if ((b.order ?? 0) !== idx + 1) {
+        b.order = idx + 1
+        patch.order = idx + 1
       }
       if (Object.keys(patch).length) pushUpdate(b.id, patch)
     })
