@@ -7,10 +7,13 @@ import { ref } from "vue";
 import { RouterLink } from "vue-router";
 import { Search, Home, Map, Plus, ChevronDown } from "@lucide/vue";
 import { NavItem } from "@/components/ui/nav-item";
-import { TripGenerateDialog } from "@/features/trip/components";
+import { TripCreateDialog } from "@/features/trip/components";
+import GroupCreateDialog from "@/features/group/components/GroupCreateDialog.vue";
 
-// 일정 자동 생성 모달 — "＋ 새 여행"에서 연다(목).
-const generateOpen = ref(false);
+// 여행 생성(수동) 모달 — "＋ 새 여행"에서 연다.
+const createTripOpen = ref(false);
+// 그룹 생성 모달 — "＋ 새 그룹"에서 연다.
+const createGroupOpen = ref(false);
 
 defineProps({
   // 워크스페이스: { name, mark } — mark 는 스위처 좌측 마크 글자.
@@ -109,14 +112,23 @@ defineProps({
       page
     />
 
-    <!-- 새 여행 → 일정 자동 생성 모달 -->
+    <!-- 새 여행 → 여행 생성(수동) 모달 -->
     <NavItem
       :icon="Plus"
       label="새 여행"
       class="mt-2.5"
-      @click="generateOpen = true"
+      @click="createTripOpen = true"
     />
 
-    <TripGenerateDialog v-model:open="generateOpen" />
+    <!-- 새 그룹 → 그룹 생성 모달 -->
+    <NavItem
+      :icon="Plus"
+      label="새 그룹"
+      class="mt-0.5"
+      @click="createGroupOpen = true"
+    />
+
+    <TripCreateDialog v-model:open="createTripOpen" />
+    <GroupCreateDialog v-model:open="createGroupOpen" />
   </aside>
 </template>

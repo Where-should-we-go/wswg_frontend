@@ -7,13 +7,16 @@ import {
   refreshAccessToken,
   startOAuthLogin,
 } from '@/services/auth'
-import { TripGenerateDialog } from '@/features/trip/components'
+import { TripCreateDialog } from '@/features/trip/components'
+import GroupCreateDialog from '@/features/group/components/GroupCreateDialog.vue'
 
 const user = ref(null)
 const message = ref('사용자 정보를 불러오는 중입니다.')
 
-// 일정 자동 생성 모달 — "＋ 새 여행"에서 연다(목).
-const generateOpen = ref(false)
+// 여행 생성(수동) 모달 — "＋ 새 여행"에서 연다.
+const createTripOpen = ref(false)
+// 그룹 생성 모달 — "＋ 새 그룹"에서 연다.
+const createGroupOpen = ref(false)
 
 const displayName = computed(() => user.value?.name || user.value?.email || '여행자')
 
@@ -57,9 +60,14 @@ onMounted(loadUser)
       <div>
         <p>My Page</p>
         <h1>{{ displayName }}님</h1>
-        <button class="new-trip" type="button" @click="generateOpen = true">
-          ＋ 새 여행
-        </button>
+        <div class="create-actions">
+          <button class="new-trip" type="button" @click="createTripOpen = true">
+            ＋ 새 여행
+          </button>
+          <button class="new-trip secondary" type="button" @click="createGroupOpen = true">
+            ＋ 새 그룹
+          </button>
+        </div>
         <dl v-if="user">
           <div>
             <dt>이메일</dt>
@@ -88,7 +96,8 @@ onMounted(loadUser)
       </div>
     </section>
 
-    <TripGenerateDialog v-model:open="generateOpen" />
+    <TripCreateDialog v-model:open="createTripOpen" />
+    <GroupCreateDialog v-model:open="createGroupOpen" />
   </main>
 </template>
 
@@ -192,8 +201,14 @@ h1 {
   letter-spacing: 0;
 }
 
-.new-trip {
+.create-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
   margin: 0 0 24px;
+}
+
+.new-trip {
   padding: 9px 16px;
   border: 0;
   border-radius: 8px;
@@ -207,6 +222,13 @@ h1 {
 
 .new-trip:hover {
   transform: translateY(-1px);
+}
+
+.new-trip.secondary {
+  color: #1d4ed8;
+  border: 1px solid #c7dcff;
+  background: #ffffff;
+  box-shadow: 0 12px 26px rgba(37, 99, 235, 0.12);
 }
 
 dl {
