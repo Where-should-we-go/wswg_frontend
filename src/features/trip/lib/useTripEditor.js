@@ -168,7 +168,7 @@ export function useTripEditor(initialTrip) {
   function sendOp(type, payload) {
     // payload 에 clientId 를 실어 보낸다(서버가 block/meta op 의 payload 를 그대로 echo →
     // 수신 측에서 자기 탭이 보낸 것인지 판별). block 안이 아니라 payload 최상위에 둠.
-    const withCid = { ...(payload ?? {}), clientId: myClientId }
+    const withCid = { ...payload, clientId: myClientId }
     if (socket && socket.send({ type, tripId: trip.value.trip_id, payload: withCid })) {
       syncState.value = 'saving' // 서버 ack 수신 시 synced
       return true
@@ -194,7 +194,7 @@ export function useTripEditor(initialTrip) {
     const b = findBlock(id)
     if (!b) return
     Object.assign(b, patch) // 로컬 즉시(캘린더·보드 등 다른 뷰도 함께 갱신)
-    const merged = { ...(livePatches.get(id) ?? {}), ...patch }
+    const merged = { ...livePatches.get(id), ...patch }
     livePatches.set(id, merged)
     clearTimeout(liveTimers.get(id))
     liveTimers.set(
@@ -229,7 +229,7 @@ export function useTripEditor(initialTrip) {
           block.properties = {}
           continue
         }
-        const props = { ...(block.properties ?? {}) }
+        const props = { ...block.properties }
         for (const [pk, pv] of Object.entries(value)) {
           if (pv === null || pv === '' || (typeof pv === 'string' && !pv.trim())) delete props[pk]
           else props[pk] = pv
@@ -292,7 +292,7 @@ export function useTripEditor(initialTrip) {
     } else if (type === 'meta.update') {
       const patch = msg.payload?.patch ?? {}
       if ('title' in patch) trip.value.title = patch.title
-      trip.value.data.meta = { ...(trip.value.data.meta ?? {}), ...patch }
+      trip.value.data.meta = { ...trip.value.data.meta, ...patch }
     }
   }
 
@@ -526,14 +526,24 @@ export function useTripEditor(initialTrip) {
 }
 
 // startDate~endDate(포함) 사이 "YYYY-MM-DD" 배열. 한쪽이라도 없으면 빈 배열.
+// 로컬 자정으로 파싱하므로 포맷도 로컬 기준으로 한다(toISOString=UTC 를 쓰면 KST 등에서
+// 하루 밀려 Day1 이 전날로 잡히는 버그가 생긴다).
 export function dateRange(startDate, endDate) {
   const out = []
   if (!startDate || !endDate) return out
   const cur = new Date(startDate + 'T00:00:00')
   const end = new Date(endDate + 'T00:00:00')
   while (cur <= end) {
-    out.push(cur.toISOString().slice(0, 10))
+    out.push(toLocalIsoDate(cur))
     cur.setDate(cur.getDate() + 1)
   }
   return out
+}
+
+// 로컬 시간대 기준 "YYYY-MM-DD" (toISOString 의 UTC 변환 회피).
+function toLocalIsoDate(d) {
+  const year = d.getFullYear()
+  const month = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
 }
