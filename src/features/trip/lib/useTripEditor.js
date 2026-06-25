@@ -5,7 +5,7 @@
 //     다른 참가자의 broadcast 를 수신해 로컬에 병합한다. 영속은 서버 배치 워커가 담당.
 //   · mock/오프라인(소켓 미연결): debounce 로 updateTrip(전체 PUT) 폴백.
 import { ref, computed, onMounted, onBeforeUnmount, getCurrentInstance } from 'vue'
-import { updateTrip } from '@/services/trips'
+import { updateTrip, updateTripMeta } from '@/services/trips'
 import { typeKeyOf } from '@/features/trip/lib/blockMeta'
 import { timeToMinutes, minutesToTime, DEFAULT_DURATION_MIN } from '@/features/trip/lib/calendar'
 import { blankBlock, buildPlaceBlock } from '@/features/trip/lib/placeBlock'
@@ -138,25 +138,134 @@ export function useTripEditor(initialTrip) {
     }
   }
 
-  // ── 실시간 송신/수신 ───────────────────────────────────────
-  // op 를 WS 로 송신(성공 시 true). 영속은 서버 배치 워커가 담당하므로 PUT 생략.
-  // 소켓 미연결이면 false → 호출부가 scheduleSave(PUT)로 폴백.
-  function sendOp(type, payload) {
-    // payload 에 clientId 를 실어 보낸다(서버가 block/meta op 의 payload 를 그대로 echo →
-    // 수신 측에서 자기 탭이 보낸 것인지 판별). block 안이 아니라 payload 최상위에 둠.
-    const withCid = { ...payload, clientId: myClientId }
-    if (socket && socket.send({ type, tripId: trip.value.trip_id, payload: withCid })) {
-      syncState.value = 'saving' // 서버 ack 수신 시 synced
-      return true
-    }
-    return false
+  // ── 실시간 송신: 미확인 op 큐 ──────────────────────────────
+  // 핵심 설계: 실시간 모드에서는 편집 op 를 절대 PUT 으로 폴백하지 않는다(전체 PUT 은
+  // Redis state 를 우회해 flush 워커가 되돌리는 유실의 주범). 대신 op 마다 clientOpId 를
+  // 붙여 pending 큐에 쌓고, ack 수신 시 제거한다. 소켓이 끊겨 있으면 큐에 남았다가
+  // 재연결 후 재전송한다(서버가 clientOpId 로 멱등 처리 → 중복 적용 없음).
+  const ACK_TIMEOUT_MS = 4000 // ack 미수신 시 재전송까지 대기(끊김·동시send 프레임 깨짐 대비)
+  const RETRY_BASE_MS = 200 // PLAN_EDIT_BUSY 백오프 기준
+  const MAX_OP_ATTEMPTS = 6 // 한도 초과 시 폐기(무한 재시도 방지)
+  let opCounter = 0
+  const pendingOps = [] // [{ clientOpId, type, payload, inflight, attempts, timer }]
+
+  function nextSyncState() {
+    syncState.value = pendingOps.length ? 'saving' : 'synced'
   }
 
-  // 블록 편집 1건: 실시간이면 op 송신 + 편집 중 프레즌스 알림, 아니면 PUT 폴백.
+  function armAckTimeout(op) {
+    clearTimeout(op.timer)
+    op.timer = setTimeout(() => {
+      // ack 가 안 왔다 — 재전송(서버 dedup 으로 안전). 한도 초과면 폐기.
+      op.inflight = false
+      if (op.attempts >= MAX_OP_ATTEMPTS) {
+        resolveOp(op.clientOpId)
+        syncState.value = 'error'
+      } else {
+        flushPending()
+      }
+    }, ACK_TIMEOUT_MS)
+  }
+
+  // pending 큐를 순서대로 전송. 소켓이 안 열려 있으면 멈추고 재연결 때 다시 시도.
+  function flushPending() {
+    if (!socket) return
+    for (const op of pendingOps) {
+      if (op.inflight) continue
+      const sent = socket.send({
+        type: op.type,
+        tripId: trip.value.trip_id,
+        payload: { ...op.payload, clientId: myClientId, clientOpId: op.clientOpId },
+      })
+      if (!sent) break // 소켓 미연결 — 재연결(open→sync) 후 flushPending 재호출
+      op.inflight = true
+      op.attempts += 1
+      armAckTimeout(op)
+    }
+  }
+
+  // 편집 op 를 큐에 적재(영속은 서버 배치 워커). clientOpId 로 ack/dedup 매칭.
+  function enqueueOp(type, payload) {
+    const clientOpId = `${myClientId}:${++opCounter}`
+    pendingOps.push({ clientOpId, type, payload, inflight: false, attempts: 0, timer: null })
+    syncState.value = 'saving'
+    flushPending()
+    return clientOpId
+  }
+
+  function resolveOp(clientOpId) {
+    const i = pendingOps.findIndex((o) => o.clientOpId === clientOpId)
+    if (i < 0) return false
+    clearTimeout(pendingOps[i].timer)
+    pendingOps.splice(i, 1)
+    return true
+  }
+
+  function onAck(clientOpId) {
+    if (clientOpId) resolveOp(clientOpId)
+    nextSyncState()
+  }
+
+  function onOpError(code, clientOpId) {
+    const op = clientOpId ? pendingOps.find((o) => o.clientOpId === clientOpId) : null
+    if (code === 'PLAN_EDIT_BUSY') {
+      // 편집 락 경합 — 잠시 후 재시도(폐기 금지). op 식별 불가하면 전체 재시도.
+      if (op) {
+        clearTimeout(op.timer)
+        op.inflight = false
+        if (op.attempts >= MAX_OP_ATTEMPTS) {
+          resolveOp(clientOpId)
+          syncState.value = 'error'
+        } else {
+          op.timer = setTimeout(flushPending, RETRY_BASE_MS * op.attempts)
+        }
+      } else {
+        pendingOps.forEach((o) => (o.inflight = false))
+        setTimeout(flushPending, RETRY_BASE_MS)
+      }
+      return
+    }
+    if (code === 'STALE') {
+      // 대상 블록이 이미 삭제됨 — 재시도해도 동일하므로 조용히 폐기.
+      if (clientOpId) resolveOp(clientOpId)
+      nextSyncState()
+      return
+    }
+    // 그 외(잘못된 JSON 등) — 재시도 불가, 폐기 + 에러 표시.
+    if (clientOpId) resolveOp(clientOpId)
+    syncState.value = 'error'
+  }
+
+  // presence 등 휘발성 신호 — 큐/재시도 없이 fire-and-forget.
+  function sendEphemeral(type, payload) {
+    if (!socket) return
+    socket.send({ type, tripId: trip.value.trip_id, payload: { ...payload, clientId: myClientId } })
+  }
+
+  // 끊긴 동안 서버 스냅샷(sync)이 로컬을 덮어쓴 뒤, 아직 ack 안 된 pending op 를
+  // 새 스냅샷 위에 다시 얹어 낙관적 편집을 보존한다(applyRemote 와 동일 규칙).
+  function applyOpLocally(type, payload) {
+    if (type === 'block.add') {
+      const block = payload?.block ?? payload
+      if (block?.id && !findBlock(block.id)) trip.value.data.items.push(block)
+    } else if (type === 'block.update') {
+      const b = findBlock(payload?.id)
+      if (b) applyPatch(b, payload?.patch)
+    } else if (type === 'block.remove') {
+      const idx = items.value.findIndex((b) => b.id === payload?.id)
+      if (idx >= 0) trip.value.data.items.splice(idx, 1)
+    } else if (type === 'meta.update') {
+      const patch = payload?.patch ?? {}
+      if ('title' in patch) trip.value.title = patch.title
+      trip.value.data.meta = { ...trip.value.data.meta, ...patch }
+    }
+  }
+
+  // 블록 편집 1건: 실시간이면 op 큐 적재 + 편집 중 프레즌스 알림, 아니면(mock/오프라인) PUT.
   function commitEdit(type, payload, blockId) {
-    const sent = sendOp(type, payload)
-    if (sent) {
-      if (blockId) sendOp('presence', { blockId })
+    if (realtimeEnabled) {
+      enqueueOp(type, payload)
+      if (blockId) sendEphemeral('presence', { blockId })
     } else {
       scheduleSave()
     }
@@ -179,6 +288,9 @@ export function useTripEditor(initialTrip) {
         const p = livePatches.get(id) ?? {}
         livePatches.delete(id)
         liveTimers.delete(id)
+        // 디바운스 대기 중 재연결 sync 가 로컬을 덮었을 수 있으니 로컬 재반영(멱등) 후 송신.
+        const b2 = findBlock(id)
+        if (b2) Object.assign(b2, p)
         commitEdit('block.update', { id, patch: p }, id)
       }, 300),
     )
@@ -193,7 +305,7 @@ export function useTripEditor(initialTrip) {
     metaTimer = setTimeout(() => {
       const p = metaPatch
       metaPatch = {}
-      sendOp('meta.update', { patch: p })
+      enqueueOp('meta.update', { patch: p })
     }, 300)
   }
 
@@ -233,15 +345,23 @@ export function useTripEditor(initialTrip) {
       }
       presenceMap.value = next
       realtimeReady.value = true
-      syncState.value = 'synced'
+      // 재연결 시: 서버 스냅샷이 로컬을 덮었으니, 아직 ack 안 된 pending op 를 다시 얹고
+      // 재전송한다(서버 dedup 으로 중복 적용 없음). 끊긴 동안의 편집 유실 방지.
+      for (const op of pendingOps) applyOpLocally(op.type, op.payload)
+      pendingOps.forEach((op) => {
+        clearTimeout(op.timer)
+        op.inflight = false
+      })
+      flushPending()
+      nextSyncState()
       return
     }
     if (type === 'ack') {
-      syncState.value = 'synced'
+      onAck(msg.payload?.clientOpId)
       return
     }
     if (type === 'error') {
-      syncState.value = 'error'
+      onOpError(msg.payload?.code, msg.payload?.clientOpId)
       return
     }
     if (type === 'presence') {
@@ -292,6 +412,12 @@ export function useTripEditor(initialTrip) {
       })
     })
     onBeforeUnmount(() => {
+      // 모든 타이머 정리(누수/언마운트 후 콜백 방지).
+      for (const op of pendingOps) clearTimeout(op.timer)
+      for (const t of liveTimers.values()) clearTimeout(t)
+      clearTimeout(saveTimer)
+      clearTimeout(metaTimer)
+      clearTimeout(metaPersistTimer)
       socket?.close()
       socket = null
     })
@@ -379,9 +505,10 @@ export function useTripEditor(initialTrip) {
     commitEdit('block.update', { id, patch: next }, id)
   }
 
-  // WS op(있으면) / PUT 폴백 — 프레즌스 없이 조용히 보냄(재패킹은 블록 여럿 갱신).
+  // 실시간이면 op 큐(프레즌스 없이 조용히), 아니면 PUT — 재패킹은 블록 여럿 갱신.
   function pushUpdate(id, patch) {
-    if (!sendOp('block.update', { id, patch })) scheduleSave()
+    if (realtimeEnabled) enqueueOp('block.update', { id, patch })
+    else scheduleSave()
   }
 
   // 순차 재패킹 — 순서(orderedIds)대로 시간 있는 블록을 겹침 없이 이어 배치하고,
@@ -448,15 +575,14 @@ export function useTripEditor(initialTrip) {
 
   // 같은 날 안에서 순서 재배치(롱프레스/드래그). orderedIds = 새 순서의 블록 id[].
   function reorderWithin(date, orderedIds) {
-    let sent = false
     orderedIds.forEach((id, i) => {
       const b = findBlock(id)
       if (b && b.visitDate === date) {
         b.order = i + 1
-        if (sendOp('block.update', { id, patch: { order: b.order } })) sent = true
+        if (realtimeEnabled) enqueueOp('block.update', { id, patch: { order: b.order } })
       }
     })
-    if (!sent) scheduleSave()
+    if (!realtimeEnabled) scheduleSave()
   }
 
   // 미디어 append(E1 업로드). 업로드된 { type, url, metadata } 를 블록 media[] 끝에 더한다.
@@ -497,12 +623,34 @@ export function useTripEditor(initialTrip) {
     }
   }
 
+  // 제목 컬럼 영속(디바운스). data 를 건드리지 않는 PATCH /meta 경로 — 전체 PUT 이
+  // Redis state 를 우회해 flush 워커가 되돌리던 문제를 피한다.
+  let metaPersistTimer = null
+  function schedulePersistMeta() {
+    clearTimeout(metaPersistTimer)
+    metaPersistTimer = setTimeout(async () => {
+      try {
+        await updateTripMeta(trip.value.trip_id, {
+          title: trip.value.title,
+          startDate: trip.value.start_date,
+          endDate: trip.value.end_date,
+        })
+      } catch {
+        // 컬럼 저장 실패는 조용히 — 실시간 echo(meta.update)는 이미 반영됨.
+      }
+    }, 600)
+  }
+
   function setTitle(title) {
     trip.value.title = title
-    // 제목은 trips 컬럼이라 배치 워커가 영속하지 않음 → 실시간 echo(meta.update, 디바운스) +
-    // 컬럼 영속을 위한 PUT(debounce) 둘 다 수행.
-    scheduleMetaSend({ title })
-    scheduleSave()
+    if (realtimeEnabled) {
+      // 제목은 trips 컬럼이라 배치 워커가 영속하지 않음 → 실시간 echo(meta.update, 디바운스) +
+      // 컬럼 영속을 위한 PATCH /meta(디바운스). 전체 PUT(data 포함)은 쓰지 않는다.
+      scheduleMetaSend({ title })
+      schedulePersistMeta()
+    } else {
+      scheduleSave()
+    }
   }
 
   // 여행 기간(시작·종료일) 변경. 날짜는 trips 컬럼이라 PUT 으로 영속.
