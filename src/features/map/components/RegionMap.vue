@@ -1,7 +1,7 @@
 <script setup>
 // RegionMap — 발자취 지도(S8) 본문.
 // 전국을 시군구 경계로 그리고, 미디어가 있는 시군구만 사진/타입 배지로 채운다.
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { MEDIA_BADGE } from '@/features/map/data/koreaSido'
 
 const MUNICIPALITY_GEOJSON_URL =
@@ -37,6 +37,15 @@ const emit = defineEmits(['select-gugun', 'select-pin'])
 
 const mapStatus = ref('loading')
 const rawFeatures = ref([])
+const zoomSido = ref(null)
+
+watch(
+  () => props.focusedSido,
+  (sidoCode) => {
+    zoomSido.value = sidoCode
+  },
+  { immediate: true },
+)
 
 onMounted(loadMunicipalities)
 
@@ -105,16 +114,40 @@ const cells = computed(() =>
 )
 
 const visibleCells = computed(() =>
-  props.focusedSido == null
+  zoomSido.value == null
     ? cells.value
-    : cells.value.filter((cell) => cell.sidoCode === props.focusedSido),
+    : cells.value.filter((cell) => cell.sidoCode === zoomSido.value),
 )
 
-const visitedCount = computed(() => cells.value.filter((cell) => cell.media.length > 0).length)
-const totalCount = computed(() => cells.value.length)
+const visibleVisitedCount = computed(() => visibleCells.value.filter((cell) => cell.media.length > 0).length)
+const visibleTotalCount = computed(() => visibleCells.value.length)
 const focusedSidoName = computed(() =>
-  props.focusedSido == null ? '' : (visibleCells.value[0]?.sidoName ?? ''),
+  zoomSido.value == null ? '' : (visibleCells.value[0]?.sidoName ?? ''),
 )
+const zoomOptions = computed(() => {
+  const bySido = new Map()
+  for (const cell of cells.value) {
+    if (!bySido.has(cell.sidoCode)) bySido.set(cell.sidoCode, cell.sidoName)
+  }
+  return [...bySido.entries()]
+    .map(([value, label]) => ({ value, label }))
+    .sort((a, b) => a.label.localeCompare(b.label, 'ko'))
+})
+const mapViewBox = computed(() => {
+  if (zoomSido.value == null || !visibleCells.value.length) return '0 0 100 140'
+
+  const minX = Math.min(...visibleCells.value.map((cell) => cell.bounds.x))
+  const minY = Math.min(...visibleCells.value.map((cell) => cell.bounds.y))
+  const maxX = Math.max(...visibleCells.value.map((cell) => cell.bounds.x + cell.bounds.w))
+  const maxY = Math.max(...visibleCells.value.map((cell) => cell.bounds.y + cell.bounds.h))
+  const padding = 2.4
+  const x = Math.max(0, minX - padding)
+  const y = Math.max(0, minY - padding)
+  const width = Math.min(100 - x, maxX - minX + padding * 2)
+  const height = Math.min(140 - y, maxY - minY + padding * 2)
+
+  return `${round(x)} ${round(y)} ${round(width)} ${round(height)}`
+})
 
 function toCell(feature) {
   const code = String(feature.properties?.code ?? '')
@@ -230,7 +263,7 @@ function cellClass(cell) {
 }
 
 function cellOpacity(cell) {
-  if (props.focusedSido == null || props.focusedSido === cell.sidoCode) return 1
+  if (zoomSido.value == null || zoomSido.value === cell.sidoCode) return 1
   return 0.2
 }
 
@@ -258,6 +291,11 @@ function onCell(cell) {
     regionLabel: cell.label,
     preloadedItems: cell.media,
   })
+}
+
+function onZoomChange(event) {
+  const value = event.target.value
+  zoomSido.value = value === '' ? null : Number(value)
 }
 
 function round(value) {
@@ -291,16 +329,35 @@ function sidoNameOf(sidoCode) {
 
 <template>
   <div class="relative h-full min-h-[420px] overflow-hidden bg-[var(--bg-subtle)]">
-    <div
-      class="absolute top-3.5 left-3.5 z-[2] rounded-[var(--radius)] border border-[var(--border)] bg-[color-mix(in_srgb,var(--card)_94%,transparent)] px-3 py-2 text-[13px] text-[var(--ink-2)]"
-    >
-      <template v-if="mapStatus === 'ready'">
-        <b class="text-[var(--brand-ink)]">{{ focusedSidoName || '전국' }}</b>
-        시군구 {{ totalCount }}곳 중
-        <b class="text-[var(--brand-ink)]">{{ visitedCount }}곳</b>에 기록이 있어요
-      </template>
-      <template v-else-if="mapStatus === 'loading'">시군구 지도를 불러오고 있어요…</template>
-      <template v-else>시군구 지도를 불러오지 못했어요</template>
+    <div class="absolute top-3.5 right-3.5 left-3.5 z-[2] flex flex-wrap items-start justify-between gap-2">
+      <div
+        class="rounded-[var(--radius)] border border-[var(--border)] bg-[color-mix(in_srgb,var(--card)_94%,transparent)] px-3 py-2 text-[13px] text-[var(--ink-2)]"
+      >
+        <template v-if="mapStatus === 'ready'">
+          <b class="text-[var(--brand-ink)]">{{ focusedSidoName || '전국' }}</b>
+          시군구 {{ visibleTotalCount }}곳 중
+          <b class="text-[var(--brand-ink)]">{{ visibleVisitedCount }}곳</b>에 기록이 있어요
+        </template>
+        <template v-else-if="mapStatus === 'loading'">시군구 지도를 불러오고 있어요…</template>
+        <template v-else>시군구 지도를 불러오지 못했어요</template>
+      </div>
+
+      <label
+        class="flex items-center gap-2 rounded-[var(--radius)] border border-[var(--border)] bg-[color-mix(in_srgb,var(--card)_94%,transparent)] px-3 py-2 text-[12px] font-bold text-[var(--ink-2)]"
+      >
+        <span>도/시 확대</span>
+        <select
+          :value="zoomSido ?? ''"
+          class="h-7 rounded-[var(--radius-sm)] border border-[var(--border)] bg-[var(--card)] px-2 text-[12px] font-semibold text-[var(--ink)] outline-none focus:border-[var(--brand)]"
+          aria-label="도/시 확대"
+          @change="onZoomChange"
+        >
+          <option value="">전국</option>
+          <option v-for="option in zoomOptions" :key="option.value" :value="option.value">
+            {{ option.label }}
+          </option>
+        </select>
+      </label>
     </div>
 
     <div
@@ -314,7 +371,7 @@ function sidoNameOf(sidoCode) {
       </span>
     </div>
 
-    <svg viewBox="0 0 100 140" class="block h-full w-full" role="img" aria-label="시군구 발자취 지도">
+    <svg :viewBox="mapViewBox" class="block h-full w-full" role="img" aria-label="시군구 발자취 지도">
       <defs>
         <clipPath v-for="cell in visibleCells" :id="clipId(cell)" :key="`clip-${cell.id}`">
           <path :d="cell.path" />
