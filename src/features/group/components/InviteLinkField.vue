@@ -29,7 +29,7 @@ async function copy(url) {
     <div
       class="flex items-center gap-2 rounded-[var(--radius)] border border-[var(--border)] bg-[var(--bg-subtle)] px-3 py-2"
     >
-      <span class="flex-1 truncate text-[13px] text-[var(--ink-2)]" :title="link.url">
+      <span class="min-w-0 flex-1 truncate text-[13px] text-[var(--ink-2)]" :title="link.url">
         {{ link.url }}
       </span>
       <Button size="sm" variant="outline" class="shrink-0" @click="copy(link.url)">

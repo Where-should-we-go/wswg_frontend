@@ -1,5 +1,5 @@
 // 모임 도메인 (S9 모임 관리 · 셸 워크스페이스 스위처).
-import { apiGet, apiPost, apiDelete } from './api'
+import { apiGet, apiPost, apiPatch, apiDelete } from './api'
 import { USE_MOCK, mockDelay } from './config'
 import * as db from './mock/db'
 
@@ -68,6 +68,17 @@ export async function createGroup(groupName) {
   return apiPost('/api/groups', { groupName })
 }
 
+// 모임 이름 변경(모임장만). 백엔드 PATCH /api/groups/{id} → 갱신된 GroupDto.
+export async function updateGroupName(groupId, groupName) {
+  if (USE_MOCK) {
+    await mockDelay()
+    const g = db.GROUPS.find((x) => x.groupId === Number(groupId))
+    if (g) g.groupName = groupName
+    return g ? { ...g, memberCount: g.members.length } : null
+  }
+  return apiPatch(`/api/groups/${groupId}`, { groupName })
+}
+
 // 초대 링크 발급(C2). 토큰 URL + 만료.
 export async function createInviteLink(groupId) {
   if (USE_MOCK) {
@@ -94,16 +105,22 @@ export function normalizeInviteLink(link) {
   }
 }
 
+// 공유용 공개 origin. VITE_PUBLIC_ORIGIN 이 있으면 그걸 쓰고(데모 시 외부 IP 고정),
+// 없으면 현재 접속한 주소(location.origin)로 폴백한다.
+function publicOrigin() {
+  return import.meta.env.VITE_PUBLIC_ORIGIN || location.origin
+}
+
 export function buildInviteLinkUrl(token) {
   if (!token) return ''
 
-  return `${location.origin}/groups/join?token=${encodeURIComponent(token)}`
+  return `${publicOrigin()}/groups/join?token=${encodeURIComponent(token)}`
 }
 
 function toAbsoluteInviteUrl(url) {
   if (!url) return ''
 
-  return new URL(url, location.origin).toString()
+  return new URL(url, publicOrigin()).toString()
 }
 
 export async function joinByToken(token) {
@@ -159,6 +176,18 @@ export async function removeMember(groupId, userId) {
     return null
   }
   return apiDelete(`/api/groups/${groupId}/members/${userId}`)
+}
+
+// 모임 삭제(모임장만). 백엔드 DELETE /api/groups/{id} → 204.
+// FK ON DELETE CASCADE 로 멤버·여행·가입요청·지도미디어가 함께 정리된다.
+export async function deleteGroup(groupId) {
+  if (USE_MOCK) {
+    await mockDelay()
+    const i = db.GROUPS.findIndex((x) => x.groupId === Number(groupId))
+    if (i >= 0) db.GROUPS.splice(i, 1)
+    return null
+  }
+  return apiDelete(`/api/groups/${groupId}`)
 }
 
 function today() {

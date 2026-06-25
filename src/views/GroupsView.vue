@@ -14,15 +14,20 @@ import EmptyState from '@/components/common/EmptyState.vue'
 import {
   getGroups,
   getGroup,
+  getGroupMembers,
   getJoinRequests,
   approveJoinRequest,
   removeMember,
+  updateGroupName,
+  deleteGroup,
 } from '@/services/groups'
+import { getCurrentUser } from '@/services/auth'
 import GroupCreateDialog from '@/features/group/components/GroupCreateDialog.vue'
 import GroupDetailPanel from '@/features/group/components/GroupDetailPanel.vue'
 import InviteLinkDialog from '@/features/group/components/InviteLinkDialog.vue'
 import AddMemberDialog from '@/features/group/components/AddMemberDialog.vue'
 import RemoveMemberDialog from '@/features/group/components/RemoveMemberDialog.vue'
+import DeleteGroupDialog from '@/features/group/components/DeleteGroupDialog.vue'
 import { useIsMobile } from '@/features/group/composables/useIsMobile'
 
 const router = useRouter()
@@ -41,6 +46,10 @@ const detailLoading = ref(false)
 const removingId = ref(null)
 const joinRequests = ref([])
 const approvingId = ref(null)
+const renaming = ref(false)
+
+// 현재 로그인 사용자 id — 모임장(owner) 여부 판별용.
+const currentUserId = ref(null)
 
 // 다이얼로그/시트 열림
 const createOpen = ref(false)
@@ -48,11 +57,21 @@ const inviteOpen = ref(false)
 const addMemberOpen = ref(false)
 const removeOpen = ref(false)
 const removeTarget = ref(null)
+const deleteOpen = ref(false)
+const deleting = ref(false)
 
 // 모바일: 상세 화면으로 전환했는지
 const mobileShowDetail = ref(false)
 
 const hasGroups = computed(() => groups.value.length > 0)
+
+// 현재 보고 있는 모임의 모임장인지. detail.ownerId 와 현재 사용자 id 비교.
+const isOwner = computed(
+  () =>
+    detail.value != null &&
+    currentUserId.value != null &&
+    detail.value.ownerId === currentUserId.value,
+)
 
 // 사이드바 "새 모임"이 /groups?create=group 로 보내면 생성 모달을 연다.
 watch(
@@ -76,6 +95,8 @@ async function loadGroups({ keepSelection = false } = {}) {
     if (!keepSelection && !isMobile.value && hasGroups.value && selectedId.value == null) {
       selectGroup(groups.value[0].groupId)
     }
+    // 앱 셸 사이드바(왼쪽 패널)도 같은 목록을 쓰므로 갱신 신호를 보낸다.
+    window.dispatchEvent(new Event('wswg:groups-changed'))
   } catch {
     listError.value = true
     toast.error('모임을 불러오지 못했어요. 다시 시도해 주세요.')
@@ -88,7 +109,13 @@ async function loadDetail(id) {
   detailLoading.value = true
   joinRequests.value = []
   try {
-    detail.value = await getGroup(id)
+    // getGroup 응답엔 memberCount 만 있고 members 배열이 없어서, 멤버 목록은
+    // 별도 엔드포인트(/members)로 받아 합친다.
+    const [group, members] = await Promise.all([
+      getGroup(id),
+      getGroupMembers(id).catch(() => []),
+    ])
+    detail.value = { ...group, members }
     joinRequests.value = await getJoinRequests(id).catch(() => [])
   } catch {
     toast.error('모임 정보를 불러오지 못했어요.')
@@ -161,6 +188,45 @@ async function onApproveRequest(request) {
   }
 }
 
+async function onRenameGroup(name) {
+  if (selectedId.value == null || !name) return
+  renaming.value = true
+  try {
+    await updateGroupName(selectedId.value, name)
+    toast.success('모임 이름을 바꿨어요.')
+    await loadDetail(selectedId.value)
+    loadGroups({ keepSelection: true })
+  } catch {
+    toast.error('모임 이름을 바꾸지 못했어요. 모임장만 변경할 수 있어요.')
+  } finally {
+    renaming.value = false
+  }
+}
+
+function onDeleteGroup() {
+  if (selectedId.value == null) return
+  deleteOpen.value = true
+}
+
+async function confirmDeleteGroup() {
+  if (selectedId.value == null) return
+  deleting.value = true
+  try {
+    await deleteGroup(selectedId.value)
+    toast.success('모임을 삭제했어요.')
+    deleteOpen.value = false
+    // 선택 해제 후 목록 갱신.
+    selectedId.value = null
+    detail.value = null
+    mobileShowDetail.value = false
+    await loadGroups()
+  } catch {
+    toast.error('모임을 삭제하지 못했어요. 모임장만 삭제할 수 있어요.')
+  } finally {
+    deleting.value = false
+  }
+}
+
 function goNewPlan() {
   router.push({ path: '/plans/new', query: { groupId: selectedId.value } })
 }
@@ -169,7 +235,15 @@ function goMap() {
   if (selectedId.value != null) router.push(`/groups/${selectedId.value}/map`)
 }
 
-onMounted(() => loadGroups())
+onMounted(() => {
+  loadGroups()
+  // 모임장 여부 판별을 위해 현재 사용자 id 를 미리 받아둔다(실패는 무시).
+  getCurrentUser()
+    .then((u) => {
+      currentUserId.value = u?.id ?? null
+    })
+    .catch(() => {})
+})
 </script>
 
 <template>
@@ -271,10 +345,14 @@ onMounted(() => loadGroups())
         :removing-id="removingId"
         :join-requests="joinRequests"
         :approving-id="approvingId"
+        :is-owner="isOwner"
+        :renaming="renaming"
         @invite="inviteOpen = true"
         @add-member="addMemberOpen = true"
         @approve-request="onApproveRequest"
         @remove-member="onRemoveMember"
+        @rename="onRenameGroup"
+        @delete-group="onDeleteGroup"
         @go-new-plan="goNewPlan"
         @go-map="goMap"
       />
@@ -297,6 +375,13 @@ onMounted(() => loadGroups())
       :member="removeTarget"
       :loading="removingId != null"
       @confirm="confirmRemoveMember"
+    />
+
+    <DeleteGroupDialog
+      v-model:open="deleteOpen"
+      :group="detail"
+      :loading="deleting"
+      @confirm="confirmDeleteGroup"
     />
   </div>
 </template>
