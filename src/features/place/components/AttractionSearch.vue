@@ -3,8 +3,8 @@
 // 존1 검색바(키워드·시도·구군·검색) / 존2 필터칩(테마)+결과 수 / 존3 카드 그리드 / 존4 페이징.
 // 데이터는 서비스 레이어(@/services/attractions)로만 접근(mock↔실제 자동 전환).
 import { computed, onMounted, reactive, ref, watch } from 'vue'
-import { useRouter } from 'vue-router'
-import { SlidersHorizontal, Search } from '@lucide/vue'
+import { useRoute, useRouter } from 'vue-router'
+import { Plus, SlidersHorizontal, Search } from '@lucide/vue'
 import { toast } from 'vue-sonner'
 import { Input } from '@/components/ui/input'
 import { Select } from '@/components/ui/select'
@@ -25,8 +25,14 @@ import {
 } from '@/components/ui/sheet'
 import EmptyState from '@/components/common/EmptyState.vue'
 import { getSidos, getGuguns, getContentTypes, searchAttractions } from '@/services/attractions'
+import { getMyTrips } from '@/services/mypage'
+import { getTrip, updateTrip } from '@/services/trips'
+import { isAuthenticated } from '@/services/auth'
+import TripPickerList from '@/features/attraction-detail/TripPickerList.vue'
+import { buildPlaceBlock } from '@/features/trip/lib/placeBlock'
 
 const router = useRouter()
+const route = useRoute()
 
 const PAGE_SIZE = 12
 
@@ -59,6 +65,13 @@ const results = ref([])
 const totalElements = ref(0)
 const loading = ref(true) // 초기 마운트부터 결과 조회 전까지 스켈레톤 유지
 const errored = ref(false)
+
+// ── 검색 결과에서 바로 여행에 담기 ──────────────────────────
+const pickerOpen = ref(false)
+const trips = ref([])
+const tripsLoading = ref(false)
+const adding = ref(false)
+const selectedPlace = ref(null)
 
 const sidoOptions = computed(() => sidos.value.map((s) => ({ value: s.sidoCode, label: s.sidoName })))
 const gugunOptions = computed(() => guguns.value.map((g) => ({ value: g.gugunCode, label: g.gugunName })))
@@ -164,6 +177,66 @@ function resetFilters() {
 function goDetail(contentId) {
   if (contentId == null) return
   router.push(`/attractions/${contentId}`)
+}
+
+async function onAddPlaceClick(place) {
+  if (!isAuthenticated()) {
+    toast('여행지에 담으려면 로그인이 필요해요.')
+    router.push({ name: 'login', query: { redirect: route.fullPath } })
+    return
+  }
+  selectedPlace.value = place
+  pickerOpen.value = true
+  await loadTrips()
+}
+
+async function loadTrips() {
+  tripsLoading.value = true
+  try {
+    const [mine, joined] = await Promise.all([getMyTrips('mine'), getMyTrips('joined')])
+    const seen = new Set()
+    trips.value = [...mine, ...joined].filter((trip) => {
+      if (seen.has(trip.tripId)) return false
+      seen.add(trip.tripId)
+      return true
+    })
+  } catch {
+    trips.value = []
+    toast.error('여행 목록을 불러오지 못했어요.')
+  } finally {
+    tripsLoading.value = false
+  }
+}
+
+async function addPlaceToTrip(tripCard) {
+  if (adding.value || !selectedPlace.value) return
+  adding.value = true
+  try {
+    const trip = await getTrip(tripCard.tripId)
+    const data = trip.data && typeof trip.data === 'object' ? trip.data : { items: [] }
+    const items = Array.isArray(data.items) ? data.items : []
+    const sameDay = items.filter((item) => item.visitDate == null)
+    const maxOrder = sameDay.reduce((max, item) => Math.max(max, item.order ?? 0), 0)
+    const block = buildPlaceBlock(selectedPlace.value, { order: maxOrder + 1 })
+    await updateTrip(tripCard.tripId, {
+      title: trip.title,
+      startDate: trip.start_date,
+      endDate: trip.end_date,
+      data: { ...data, items: [...items, block] },
+    })
+    pickerOpen.value = false
+    toast.success('여행에 담았어요.')
+    router.push(`/trips/${tripCard.tripId}`)
+  } catch {
+    toast.error('여행에 담지 못했어요. 잠시 후 다시 시도해 주세요.')
+  } finally {
+    adding.value = false
+  }
+}
+
+function goCreateTrip() {
+  pickerOpen.value = false
+  router.push('/plans/new')
 }
 
 // ── 모바일 바텀시트 ──────────────────────────────────────────
@@ -343,6 +416,18 @@ onMounted(async () => {
             </span>
             <Badge variant="secondary" class="shrink-0">{{ typeNameOf(place.contentTypeId) }}</Badge>
           </div>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            class="mt-2 h-8 w-full"
+            :disabled="adding && selectedPlace?.contentId === place.contentId"
+            :aria-label="`${place.title} 여행지 담기`"
+            @click.stop="onAddPlaceClick(place)"
+          >
+            <Plus class="size-3.5" />
+            여행지 담기
+          </Button>
         </div>
       </Card>
     </div>
@@ -403,6 +488,24 @@ onMounted(async () => {
           </SheetClose>
           <Button class="h-11 flex-1" @click="applySheet">적용</Button>
         </SheetFooter>
+      </SheetContent>
+    </Sheet>
+
+    <Sheet v-model:open="pickerOpen">
+      <SheetContent side="bottom" class="gap-5 sm:max-w-xl sm:rounded-t-[var(--radius-win)]">
+        <SheetHeader class="p-0 text-left">
+          <SheetTitle>어느 여행에 담을까요?</SheetTitle>
+          <SheetDescription>
+            {{ selectedPlace?.title ?? '선택한 여행지' }}를 여행 블록으로 추가해요.
+          </SheetDescription>
+        </SheetHeader>
+        <TripPickerList
+          :trips="trips"
+          :loading="tripsLoading"
+          :adding="adding"
+          @select="addPlaceToTrip"
+          @create="goCreateTrip"
+        />
       </SheetContent>
     </Sheet>
   </main>
