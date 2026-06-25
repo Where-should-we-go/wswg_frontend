@@ -11,7 +11,13 @@ import { Card } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import { AvatarStack } from '@/components/ui/avatar-stack'
 import EmptyState from '@/components/common/EmptyState.vue'
-import { getGroups, getGroup, removeMember } from '@/services/groups'
+import {
+  getGroups,
+  getGroup,
+  getJoinRequests,
+  approveJoinRequest,
+  removeMember,
+} from '@/services/groups'
 import GroupCreateDialog from '@/features/group/components/GroupCreateDialog.vue'
 import GroupDetailPanel from '@/features/group/components/GroupDetailPanel.vue'
 import InviteLinkDialog from '@/features/group/components/InviteLinkDialog.vue'
@@ -33,6 +39,8 @@ const selectedId = ref(null)
 const detail = ref(null)
 const detailLoading = ref(false)
 const removingId = ref(null)
+const joinRequests = ref([])
+const approvingId = ref(null)
 
 // 다이얼로그/시트 열림
 const createOpen = ref(false)
@@ -78,8 +86,10 @@ async function loadGroups({ keepSelection = false } = {}) {
 
 async function loadDetail(id) {
   detailLoading.value = true
+  joinRequests.value = []
   try {
     detail.value = await getGroup(id)
+    joinRequests.value = await getJoinRequests(id).catch(() => [])
   } catch {
     toast.error('모임 정보를 불러오지 못했어요.')
   } finally {
@@ -132,6 +142,22 @@ async function confirmRemoveMember() {
     toast.error('멤버를 제거하지 못했어요. 다시 시도해 주세요.')
   } finally {
     removingId.value = null
+  }
+}
+
+async function onApproveRequest(request) {
+  if (selectedId.value == null || request?.requestId == null) return
+  approvingId.value = request.requestId
+  try {
+    const member = await approveJoinRequest(selectedId.value, request.requestId)
+    const name = member?.name || request.name || request.email || '새 멤버'
+    toast.success(`${name}님을 수락했어요.`)
+    await loadDetail(selectedId.value)
+    loadGroups({ keepSelection: true })
+  } catch {
+    toast.error('가입 요청을 수락하지 못했어요.')
+  } finally {
+    approvingId.value = null
   }
 }
 
@@ -243,8 +269,11 @@ onMounted(() => loadGroups())
         :group="detail"
         :loading="detailLoading"
         :removing-id="removingId"
+        :join-requests="joinRequests"
+        :approving-id="approvingId"
         @invite="inviteOpen = true"
         @add-member="addMemberOpen = true"
+        @approve-request="onApproveRequest"
         @remove-member="onRemoveMember"
         @go-new-plan="goNewPlan"
         @go-map="goMap"

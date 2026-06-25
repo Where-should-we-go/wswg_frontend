@@ -484,6 +484,8 @@ function syncLabel() {
           :items="ed.items.value"
           :default-date="ed.days.value[0]?.date ?? null"
           @add-block="onAddBlock"
+          @set-representative="onSetRepresentative"
+          @delete-media="onDeleteMedia"
         />
       </template>
 

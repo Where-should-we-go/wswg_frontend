@@ -36,7 +36,8 @@ describe('S8 GroupMapView', () => {
     await flushPromises()
 
     expect(wrapper.text()).toContain('우리가 함께 밟은 발자취')
-    expect(wrapper.text()).toContain('부산 해운대구')
+    expect(wrapper.text()).toContain('부산시')
+    expect(wrapper.text()).toContain('도/시 묶음')
     expect(wrapper.find('svg').exists()).toBe(true)
   })
 

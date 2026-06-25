@@ -1,8 +1,9 @@
 <script setup>
-// 모임 상세 패널 — 헤더 + 액션바(초대 링크·멤버 추가) + 멤버 목록 + "이 모임의 여행" 바로가기.
+// 모임 상세 패널 — 헤더 + 액션바 + 가입 요청 + 멤버 목록 + "이 모임의 여행" 바로가기.
 // group: getGroup 응답 { groupId, groupName, emoji, tripCount, members[], memberCount }
-import { Link2, UserPlus, Map, Plus, ArrowRight } from '@lucide/vue'
+import { Link2, UserPlus, Map, Plus, ArrowRight, Check } from '@lucide/vue'
 import { Button } from '@/components/ui/button'
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Separator } from '@/components/ui/separator'
 import { Skeleton } from '@/components/ui/skeleton'
 import MemberList from './MemberList.vue'
@@ -11,9 +12,22 @@ defineProps({
   group: { type: Object, default: null },
   loading: { type: Boolean, default: false },
   removingId: { type: [String, Number], default: null },
+  joinRequests: { type: Array, default: () => [] },
+  approvingId: { type: [String, Number], default: null },
 })
 
-const emit = defineEmits(['invite', 'add-member', 'remove-member', 'go-new-plan', 'go-map'])
+const emit = defineEmits([
+  'invite',
+  'add-member',
+  'approve-request',
+  'remove-member',
+  'go-new-plan',
+  'go-map',
+])
+
+function initialOf(request) {
+  return (request.name || request.email || '?').slice(0, 1)
+}
 </script>
 
 <template>
@@ -66,6 +80,46 @@ const emit = defineEmits(['invite', 'add-member', 'remove-member', 'go-new-plan'
 
       <!-- 멤버 목록 -->
       <div class="flex flex-1 flex-col overflow-y-auto px-4">
+        <div v-if="joinRequests.length" class="mb-4 flex flex-col gap-2 px-2">
+          <p class="text-[11.5px] font-bold tracking-[0.05em] text-[var(--ink-3)] uppercase">
+            가입 요청
+          </p>
+          <div
+            v-for="request in joinRequests"
+            :key="request.requestId"
+            class="flex items-center gap-3 rounded-[var(--radius)] border border-[var(--border)] px-3 py-2.5"
+          >
+            <Avatar class="size-9 shrink-0 text-[13px] font-bold text-white">
+              <AvatarImage
+                v-if="request.profileImageUrl"
+                :src="request.profileImageUrl"
+                :alt="request.name || request.email"
+              />
+              <AvatarFallback class="bg-[var(--brand)] text-white">
+                {{ initialOf(request) }}
+              </AvatarFallback>
+            </Avatar>
+
+            <div class="min-w-0 flex-1">
+              <p class="truncate text-[14px] font-semibold text-[var(--ink)]">
+                {{ request.name || request.email || `사용자 ${request.userId}` }}
+              </p>
+              <p class="truncate text-[12px] text-[var(--ink-3)]">
+                {{ request.email || '초대 링크로 요청' }}
+              </p>
+            </div>
+
+            <Button
+              size="sm"
+              :disabled="approvingId === request.requestId"
+              @click="emit('approve-request', request)"
+            >
+              <Check class="size-3.5" />
+              {{ approvingId === request.requestId ? '수락 중' : '수락' }}
+            </Button>
+          </div>
+        </div>
+
         <p class="px-2 pb-1 text-[11.5px] font-bold tracking-[0.05em] text-[var(--ink-3)] uppercase">
           멤버
         </p>

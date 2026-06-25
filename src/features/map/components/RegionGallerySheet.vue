@@ -1,10 +1,9 @@
 <script setup>
 // RegionGallerySheet — 권역/핀 클릭 시 E4 지역 미디어 갤러리. 모바일은 풀스크린
-// 바텀시트, 데스크탑은 우측 시트로 표현. 각 미디어에서 "대표로 지정"(E3) →
-// 카드·핀 갱신. 현재 대표는 "대표 해제" 가능. 카피는 해요체.
+// 바텀시트, 데스크탑은 우측 시트로 표현. 지역별 여행 기록 미디어를 감상한다.
+// 카피는 해요체.
 import { computed } from 'vue'
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet'
-import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import EmptyState from '@/components/common/EmptyState.vue'
@@ -16,8 +15,7 @@ const props = defineProps({
   regionLabel: { type: String, default: '' },
   // 그 지역의 미디어 집계(드릴다운 getGroupMap(groupId,{sidoCode,gugunCode})).
   items: { type: Array, default: () => [] },
-  // 현재 대표 추억 id(있으면 해제 버튼 노출).
-  representativeId: { type: Number, default: null },
+  representativeId: { type: [String, Number], default: null },
 })
 
 const emit = defineEmits(['update:open', 'curate', 'remove'])
@@ -31,7 +29,7 @@ const title = computed(() => props.regionLabel || '이 지역')
       <SheetHeader class="p-0">
         <SheetTitle class="text-[15px] font-bold">{{ title }} 갤러리</SheetTitle>
         <SheetDescription class="text-[12.5px] text-[var(--ink-3)]">
-          함께 남긴 순간 중 하나를 이 지역 대표로 정할 수 있어요.
+          함께 남긴 사진, 녹음, 영상을 지역별로 모아봤어요.
         </SheetDescription>
       </SheetHeader>
 
@@ -56,12 +54,19 @@ const title = computed(() => props.regionLabel || '이 지역')
           class="overflow-hidden rounded-[var(--radius)] border border-[var(--border)]"
         >
           <div class="relative aspect-square">
-            <img v-if="m.mediaUrl" :src="m.mediaUrl" alt="" class="h-full w-full object-cover" />
+            <img
+              v-if="m.mediaType === 'PHOTO' && m.mediaUrl"
+              :src="m.mediaUrl"
+              alt=""
+              class="h-full w-full object-cover"
+            />
             <div
               v-else
-              class="h-full w-full bg-[linear-gradient(135deg,var(--brand-soft),var(--bg-subtle))]"
+              class="grid h-full w-full place-items-center bg-[linear-gradient(135deg,var(--brand-soft),var(--bg-subtle))] text-3xl"
               aria-hidden="true"
-            />
+            >
+              {{ MEDIA_BADGE[m.mediaType]?.emoji || '📍' }}
+            </div>
             <Badge
               variant="secondary"
               class="absolute top-1.5 left-1.5 rounded-[var(--radius-sm)] px-1.5 py-0"
@@ -77,24 +82,9 @@ const title = computed(() => props.regionLabel || '이 지역')
           </div>
           <figcaption class="flex items-center justify-between gap-2 p-2">
             <span class="truncate text-[12px] text-[var(--ink-2)]">{{ m.caption }}</span>
-            <Button
-              v-if="m.id === representativeId"
-              variant="ghost"
-              size="sm"
-              class="h-7 flex-none px-2 text-[11.5px] text-[var(--danger)]"
-              @click="emit('remove', m)"
-            >
-              대표 해제
-            </Button>
-            <Button
-              v-else
-              variant="outline"
-              size="sm"
-              class="h-7 flex-none px-2 text-[11.5px]"
-              @click="emit('curate', m)"
-            >
-              대표로 지정
-            </Button>
+            <Badge variant="outline" class="flex-none rounded-[var(--radius-sm)] px-1.5 py-0">
+              {{ m.visitDate || m.tripTitle || '기록' }}
+            </Badge>
           </figcaption>
         </figure>
       </div>

@@ -44,6 +44,11 @@ export const GUGUNS = {
     { gugunCode: 1, sidoCode: 32, gugunName: '강릉시' },
     { gugunCode: 2, sidoCode: 32, gugunName: '속초시' },
   ],
+  38: [
+    { gugunCode: 1, sidoCode: 38, gugunName: '광양시' },
+    { gugunCode: 2, sidoCode: 38, gugunName: '여수시' },
+    { gugunCode: 3, sidoCode: 38, gugunName: '순천시' },
+  ],
 }
 
 // 콘텐츠 타입 = 테마 (TourAPI contentTypeId)
@@ -389,9 +394,11 @@ export const MY_TRIPS = {
 // ── 발자취 지도 대표 추억 (group_region_media) ───────────────
 export const REGION_MEDIA = {
   5: [
-    { id: 1, sidoCode: 6, gugunCode: 1, mediaType: 'PHOTO', mediaUrl: 'https://images.unsplash.com/photo-1601063476271-a159c71ab0b3?w=600', lat: 35.1587, lng: 129.1604, tripId: 10, regionLabel: '부산 해운대구', caption: '해운대 일출 · 7월 1일' },
-    { id: 2, sidoCode: 6, gugunCode: 3, mediaType: 'VIDEO', mediaUrl: '', lat: 35.0975, lng: 129.0107, tripId: 10, regionLabel: '부산 사하구', caption: '감천마을 · 7월 1일' },
-    { id: 3, sidoCode: 39, gugunCode: 2, mediaType: 'PHOTO', mediaUrl: 'https://images.unsplash.com/photo-1583316174775-bd6dc0e9f298?w=600', lat: 33.4587, lng: 126.9427, tripId: 11, regionLabel: '제주 서귀포시', caption: '성산일출봉 · 5월 11일' },
+    { id: 1, tripId: 10, tripTitle: '부산 2박 3일', visitDate: '2026-07-01', blockId: 'b-1', blockTitle: '해운대 해수욕장', contentId: 126512, attractionTitle: '해운대 해수욕장', sidoCode: 6, sidoName: '부산', gugunCode: 1, gugunName: '해운대구', mediaType: 'PHOTO', mediaUrl: 'https://images.unsplash.com/photo-1601063476271-a159c71ab0b3?w=600', latitude: 35.1587, longitude: 129.1604, caption: '해운대 일출 · 7월 1일' },
+    { id: 2, tripId: 10, tripTitle: '부산 2박 3일', visitDate: '2026-07-01', blockId: 'b-3', blockTitle: '감천문화마을', contentId: 126511, attractionTitle: '감천문화마을', sidoCode: 6, sidoName: '부산', gugunCode: 3, gugunName: '사하구', mediaType: 'VIDEO', mediaUrl: '', latitude: 35.0975, longitude: 129.0107, caption: '감천마을 · 7월 1일' },
+    { id: 3, tripId: 11, tripTitle: '제주 힐링 여행', visitDate: '2026-05-11', blockId: 'b-1', blockTitle: '성산일출봉', contentId: 131806, attractionTitle: '성산일출봉', sidoCode: 39, sidoName: '제주', gugunCode: 2, gugunName: '서귀포시', mediaType: 'PHOTO', mediaUrl: 'https://images.unsplash.com/photo-1583316174775-bd6dc0e9f298?w=600', latitude: 33.4587, longitude: 126.9427, caption: '성산일출봉 · 5월 11일' },
+    { id: 4, tripId: 13, tripTitle: '전남 봄 여행', visitDate: '2026-04-18', blockId: 'gwangyang-1', blockTitle: '광양읍 인서리 산책', contentId: 260001, attractionTitle: '광양읍 인서리', sidoCode: 38, sidoName: '전남', gugunCode: 1, gugunName: '광양시', mediaType: 'PHOTO', mediaUrl: 'https://images.unsplash.com/photo-1500530855697-b586d89ba3ee?w=600', latitude: 34.9407, longitude: 127.6959, caption: '광양읍 인서리 · 4월 18일' },
+    { id: 5, tripId: 13, tripTitle: '전남 봄 여행', visitDate: '2026-04-18', blockId: 'gwangyang-2', blockTitle: '섬진강 녹음 메모', contentId: 260002, attractionTitle: '섬진강', sidoCode: 38, sidoName: '전남', gugunCode: 1, gugunName: '광양시', mediaType: 'AUDIO', mediaUrl: '', latitude: 34.972, longitude: 127.76, caption: '섬진강 녹음 · 4월 18일' },
   ],
   6: [],
 }

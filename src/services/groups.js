@@ -1,6 +1,6 @@
 // 모임 도메인 (S9 모임 관리 · 셸 워크스페이스 스위처).
 import { apiGet, apiPost, apiDelete } from './api'
-import { USE_MOCK, mockDelay, toQuery } from './config'
+import { USE_MOCK, mockDelay } from './config'
 import * as db from './mock/db'
 
 let mockGroupSeq = 100
@@ -73,21 +73,63 @@ export async function createInviteLink(groupId) {
   if (USE_MOCK) {
     await mockDelay()
     const token = `mock-${groupId}-${Math.floor(performance.now())}`
-    return {
+    return normalizeInviteLink({
       token,
-      url: `${location.origin}/groups/join?token=${token}`,
       expiresAt: '24시간 뒤 만료',
-    }
+    })
   }
-  return apiPost(`/api/groups/${groupId}/invite-link`)
+  return normalizeInviteLink(await apiPost(`/api/groups/${groupId}/invite-link`))
+}
+
+export function normalizeInviteLink(link) {
+  if (!link) return null
+
+  const token = link.token ?? ''
+  const url = toAbsoluteInviteUrl(link.url || link.inviteUrl) || buildInviteLinkUrl(token)
+
+  return {
+    ...link,
+    token,
+    url,
+  }
+}
+
+export function buildInviteLinkUrl(token) {
+  if (!token) return ''
+
+  return `${location.origin}/groups/join?token=${encodeURIComponent(token)}`
+}
+
+function toAbsoluteInviteUrl(url) {
+  if (!url) return ''
+
+  return new URL(url, location.origin).toString()
 }
 
 export async function joinByToken(token) {
   if (USE_MOCK) {
     await mockDelay()
-    return db.GROUPS[0] ? { ...db.GROUPS[0], memberCount: db.GROUPS[0].members.length } : null
+    return db.GROUPS[0]
+      ? { groupId: db.GROUPS[0].groupId, userId: db.CURRENT_USER.id, status: 'PENDING' }
+      : null
   }
-  return apiPost(`/api/groups/join${toQuery({ token })}`)
+  return apiPost('/api/groups/join', { token })
+}
+
+export async function getJoinRequests(groupId) {
+  if (USE_MOCK) {
+    await mockDelay()
+    return []
+  }
+  return apiGet(`/api/groups/${groupId}/join-requests`)
+}
+
+export async function approveJoinRequest(groupId, requestId) {
+  if (USE_MOCK) {
+    await mockDelay()
+    return null
+  }
+  return apiPost(`/api/groups/${groupId}/join-requests/${requestId}/approve`, {})
 }
 
 // 멤버 직접 추가(C2). payload: { name|email }
