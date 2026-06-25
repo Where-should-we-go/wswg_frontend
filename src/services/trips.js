@@ -1,5 +1,5 @@
 // 여행 문서 도메인 (S5 자동생성 · S6 편집 · S4 추가 · S7 카드).
-import { apiGet, apiPost, apiPut, apiDelete, apiUpload } from './api'
+import { apiGet, apiPost, apiPut, apiPatch, apiDelete, apiUpload } from './api'
 import { USE_MOCK, mockDelay, toQuery } from './config'
 import { getGroupMembers } from './groups'
 import * as db from './mock/db'
@@ -73,6 +73,25 @@ export async function updateTrip(tripId, body) {
     return structuredClone(db.TRIPS[tripId])
   }
   return apiPut(`/api/trips/${tripId}`, body)
+}
+
+// ── 제목·기간만 갱신 (S6 헤더) ───────────────────────────────
+// body: { title, startDate, endDate } — data(JSONB)는 건드리지 않는다.
+// 공동편집 중 제목 저장이 전체 PUT 으로 data 를 덮어써 flush 워커와 충돌하던 문제를 피하기 위함.
+export async function updateTripMeta(tripId, body) {
+  if (USE_MOCK) {
+    await mockDelay(200)
+    const prev = db.TRIPS[tripId] ?? {}
+    db.TRIPS[tripId] = {
+      ...prev,
+      trip_id: Number(tripId),
+      title: body.title ?? prev.title,
+      start_date: body.startDate ?? prev.start_date,
+      end_date: body.endDate ?? prev.end_date,
+    }
+    return structuredClone(db.TRIPS[tripId])
+  }
+  return apiPatch(`/api/trips/${tripId}/meta`, body)
 }
 
 // ── 삭제 (D6) ────────────────────────────────────────────────
