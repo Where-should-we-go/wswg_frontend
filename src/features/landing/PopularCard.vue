@@ -41,7 +41,9 @@ function goDetail() {
     <div class="flex flex-col gap-1 p-3.5">
       <h3 class="truncate text-sm font-semibold text-[var(--ink)]">{{ item.name }}</h3>
       <p class="truncate text-xs text-[var(--ink-3)]">{{ item.regionName }}</p>
-      <p class="mt-0.5 text-xs text-[var(--ink-3)]">{{ item.tripCount }}개 여행에 담겼어요</p>
+      <p v-if="item.tripCount" class="mt-0.5 text-xs text-[var(--ink-3)]">
+        {{ item.tripCount }}개 여행에 담겼어요
+      </p>
     </div>
   </Card>
 </template>
