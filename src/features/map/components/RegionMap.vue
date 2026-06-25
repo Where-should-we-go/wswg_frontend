@@ -170,7 +170,10 @@ function toCell(feature) {
   }
   const center = polygonCenter(projected, bounds)
   const media = mediaByGugun.value.get(mediaKey(sidoCode, name)) ?? []
-  const photo = media.find((item) => item.mediaType === 'PHOTO' && item.mediaUrl)
+  // 여행에서 대표로 선정한 사진(representative)을 우선, 없으면 첫 사진을 권역 대표로.
+  const photo =
+    media.find((item) => item.representative && item.mediaType === 'PHOTO' && item.mediaUrl) ??
+    media.find((item) => item.mediaType === 'PHOTO' && item.mediaUrl)
   const representative = photo ?? media[0] ?? null
 
   return {
