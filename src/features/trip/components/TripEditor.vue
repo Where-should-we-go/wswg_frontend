@@ -37,6 +37,8 @@ const props = defineProps({
   trip: { type: Object, required: true },
   // 삭제 노출 여부. 개인 여행=본인, 그룹 여행=그룹 소유자.
   canDelete: { type: Boolean, default: false },
+  // 날짜·동행 편집 권한. 개인 여행=본인, 그룹 여행=멤버 누구나.
+  canEdit: { type: Boolean, default: false },
 })
 
 const emit = defineEmits(['delete'])
@@ -403,10 +405,10 @@ function syncLabel() {
       @compositionend="onTitleCompositionEnd"
     />
 
-    <!-- 속성 테이블 (소유자는 날짜 직접 수정 가능) -->
+    <!-- 속성 테이블 (그룹 멤버는 날짜·동행 직접 수정 가능) -->
     <TripPropertyTable
       :trip="ed.trip.value"
-      :editable="canDelete"
+      :editable="canEdit"
       @set-dates="onSetDates"
       @remove-companion="onRemoveCompanion"
     />

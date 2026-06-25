@@ -30,6 +30,15 @@ const canDelete = computed(() => {
   return owner != null && owner.userId === uid
 })
 
+// 편집 권한(날짜·동행): 개인 여행은 본인, 그룹 여행은 멤버 누구나(백엔드 validateEditable과 일치).
+const canEdit = computed(() => {
+  const t = trip.value
+  const uid = currentUserId.value
+  if (!t || !uid) return false
+  if (t.user_id != null) return t.user_id === uid
+  return (t.members ?? []).some((m) => m.userId === uid)
+})
+
 async function load(id) {
   loading.value = true
   errorStatus.value = null
@@ -93,5 +102,11 @@ async function onDelete() {
   </EmptyState>
 
   <!-- 정상 -->
-  <TripEditor v-else-if="trip" :trip="trip" :can-delete="canDelete" @delete="onDelete" />
+  <TripEditor
+    v-else-if="trip"
+    :trip="trip"
+    :can-delete="canDelete"
+    :can-edit="canEdit"
+    @delete="onDelete"
+  />
 </template>

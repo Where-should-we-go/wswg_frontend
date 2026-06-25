@@ -19,9 +19,11 @@ const isAudio = computed(() => props.media?.type === 'AUDIO')
 </script>
 
 <template>
+  <!-- Sheet/Dialog 오버레이(z-50, body 텔레포트) 위로 올리려 body로 텔레포트 + 더 높은 z-index. -->
+  <Teleport to="body">
   <div
     v-if="media"
-    class="fixed inset-0 z-50 grid place-items-center bg-black/70 p-6"
+    class="fixed inset-0 z-[100] grid place-items-center bg-black/70 p-6"
     role="dialog"
     aria-label="사진 보기"
     @click="emit('close')"
@@ -76,4 +78,5 @@ const isAudio = computed(() => props.media?.type === 'AUDIO')
       </button>
     </div>
   </div>
+  </Teleport>
 </template>

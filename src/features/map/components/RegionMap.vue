@@ -455,23 +455,6 @@ function sidoNameOf(sidoCode) {
             :r="badgeRadius(cell) * 2.8"
             class="fill-white opacity-[0.01]"
           />
-          <circle
-            v-if="cell.media.length"
-            :cx="cell.center.x"
-            :cy="cell.center.y"
-            :r="badgeRadius(cell)"
-            class="pointer-events-none fill-[var(--brand)] stroke-white"
-            stroke-width="0.28"
-          />
-          <text
-            v-if="cell.media.length"
-            :x="cell.center.x"
-            :y="cell.center.y + badgeRadius(cell) * 0.35"
-            text-anchor="middle"
-            class="pointer-events-none fill-white text-[1.7px] font-extrabold"
-          >
-            {{ cell.media.length }}
-          </text>
           <text
             v-if="cell.representative && cell.representative.mediaType !== 'PHOTO'"
             :x="cell.center.x"
