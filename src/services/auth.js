@@ -32,6 +32,19 @@ export function isLoggedOut() {
   return sessionStorage.getItem(LOGGED_OUT_KEY) === 'true'
 }
 
+// 로그아웃: 실모드는 서버에 알려 refreshToken(Redis)·쿠키를 무효화한 뒤 로컬 세션을 비운다.
+// 서버 호출이 실패해도 로컬 세션은 반드시 비워 화면상 로그인 상태가 남지 않도록 한다.
+export async function logout() {
+  if (!USE_MOCK) {
+    try {
+      await authFetch('/auth/logout', { method: 'POST' })
+    } catch {
+      /* 네트워크/서버 실패는 흡수 — 로컬 정리는 아래에서 보장 */
+    }
+  }
+  logoutLocalSession()
+}
+
 export function startOAuthLogin(provider) {
   sessionStorage.removeItem(LOGGED_OUT_KEY)
   window.location.assign(`/oauth2/authorization/${provider}`)

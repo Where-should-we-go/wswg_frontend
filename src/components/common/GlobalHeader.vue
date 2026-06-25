@@ -4,15 +4,13 @@
 import { RouterLink, useRouter } from 'vue-router'
 import { Button } from '@/components/ui/button'
 import { isAuthenticated } from '@/services/auth'
+import UserMenu from '@/features/auth/UserMenu.vue'
 
 const router = useRouter()
 const authed = isAuthenticated()
 
 function goLogin() {
   router.push('/login')
-}
-function goMypage() {
-  router.push('/mypage')
 }
 </script>
 
@@ -33,7 +31,7 @@ function goMypage() {
 
     <div class="flex items-center gap-2">
       <slot name="actions" />
-      <Button v-if="authed" variant="ghost" size="sm" @click="goMypage">내 여행으로</Button>
+      <UserMenu v-if="authed" />
       <Button v-else size="sm" @click="goLogin">시작하기</Button>
     </div>
   </header>
