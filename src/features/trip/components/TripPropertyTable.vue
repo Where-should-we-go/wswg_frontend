@@ -117,24 +117,33 @@ function memberColor(m, i) {
       <span
         v-for="(m, i) in members"
         :key="m.id"
-        class="group/companion inline-flex items-center gap-1.5 rounded-full bg-[var(--accent)] py-0.5 pl-[3px] text-[12.5px] font-medium"
-        :class="editable ? 'pr-1' : 'pr-2.5'"
+        class="group/companion inline-flex items-center gap-1.5 rounded-full bg-[var(--accent)] py-0.5 pr-2.5 pl-[3px] text-[12.5px] font-medium"
       >
+        <!-- 아바타: 관리자가 호버하면 이 자리에 빨간 X 가 덮인다(레이아웃 그대로, 클릭 시 제거). -->
+        <button
+          v-if="editable"
+          type="button"
+          class="relative grid size-[18px] place-items-center rounded-full text-[10px] font-bold text-white"
+          :style="{ backgroundColor: memberColor(m, i) }"
+          :aria-label="`${m.name} 동행에서 빼기`"
+          @click.stop="emit('remove-companion', m.id)"
+        >
+          <span class="transition group-hover/companion:opacity-0 group-focus-within/companion:opacity-0">{{
+            m.initial
+          }}</span>
+          <span
+            class="absolute inset-0 grid place-items-center rounded-full bg-[var(--destructive)] opacity-0 transition group-hover/companion:opacity-100 group-focus-within/companion:opacity-100"
+          >
+            <X class="size-3" />
+          </span>
+        </button>
         <span
+          v-else
           class="grid size-[18px] place-items-center rounded-full text-[10px] font-bold text-white"
           :style="{ backgroundColor: memberColor(m, i) }"
           >{{ m.initial }}</span
         >
         {{ m.name }}
-        <button
-          v-if="editable"
-          type="button"
-          class="ml-0.5 grid size-[18px] place-items-center rounded-full text-[var(--ink-3)] opacity-0 transition group-hover/companion:opacity-100 hover:bg-[var(--card)] hover:text-[var(--destructive)] focus-visible:opacity-100"
-          :aria-label="`${m.name} 동행에서 빼기`"
-          @click.stop="emit('remove-companion', m.id)"
-        >
-          <X class="size-3" />
-        </button>
       </span>
     </div>
 
