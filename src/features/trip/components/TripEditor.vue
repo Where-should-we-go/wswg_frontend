@@ -74,6 +74,15 @@ function onTitleCompositionEnd(e) {
   commitTitle(e.target.value) // 최종 확정 보정
 }
 
+// 여행 기간 변경. 일자가 줄면 사라진 날의 일정이 남은 날짜로 분산되므로 안내한다.
+function onSetDates({ startDate, endDate }) {
+  const prevDayCount = ed.days.value.length
+  ed.setDates(startDate, endDate)
+  if (ed.days.value.length < prevDayCount) {
+    toast('기간이 줄어 사라진 날의 일정을 남은 날짜로 옮겼어요. 위치를 확인해 주세요.')
+  }
+}
+
 // 일정 뷰 보조 토글: 'rail' | 'calendar'
 const scheduleMode = ref('rail')
 
@@ -388,8 +397,12 @@ function syncLabel() {
       @compositionend="onTitleCompositionEnd"
     />
 
-    <!-- 속성 테이블 -->
-    <TripPropertyTable :trip="ed.trip.value" />
+    <!-- 속성 테이블 (소유자는 날짜 직접 수정 가능) -->
+    <TripPropertyTable
+      :trip="ed.trip.value"
+      :editable="canDelete"
+      @set-dates="onSetDates"
+    />
 
     <div class="my-[18px] h-px bg-[var(--border)]" />
 

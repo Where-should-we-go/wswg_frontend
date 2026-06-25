@@ -9,7 +9,11 @@ import { formatBudget } from "@/features/trip/lib/blockMeta";
 
 const props = defineProps({
   trip: { type: Object, required: true },
+  // 편집 권한(여행 소유자). true 면 날짜 행을 date 입력으로 바꿔 직접 수정할 수 있다.
+  editable: { type: Boolean, default: false },
 });
+
+const emit = defineEmits(["set-dates"]);
 
 function fmt(d) {
   if (!d) return "미정";
@@ -17,6 +21,13 @@ function fmt(d) {
   return `${dt.getFullYear()}. ${dt.getMonth() + 1}. ${dt.getDate()}`;
 }
 const dateRange = computed(() => `${fmt(props.trip.start_date)} → ${fmt(props.trip.end_date)}`);
+
+function onStartDate(e) {
+  emit("set-dates", { startDate: e.target.value || null, endDate: props.trip.end_date ?? null });
+}
+function onEndDate(e) {
+  emit("set-dates", { startDate: props.trip.start_date ?? null, endDate: e.target.value || null });
+}
 
 // 지역: { label } 객체 | 문자열 | null 모두 허용.
 const regionLabel = computed(() => {
@@ -60,7 +71,32 @@ function memberColor(m, i) {
     <div class="flex items-center gap-2 py-[5px] pr-2.5 text-[13.5px] text-[var(--ink-2)]">
       <Calendar class="size-4 text-[var(--ink-3)]" /> 날짜
     </div>
-    <div class="flex items-center rounded-sm px-2 py-[5px] text-[13.5px] hover:bg-[var(--accent)]">
+    <div
+      v-if="editable"
+      class="flex items-center gap-1.5 rounded-sm px-1 py-[3px] text-[13.5px]"
+    >
+      <input
+        type="date"
+        :value="trip.start_date ?? ''"
+        :max="trip.end_date || undefined"
+        aria-label="여행 시작일"
+        class="rounded-sm bg-transparent px-1.5 py-0.5 text-[13.5px] text-[var(--ink)] outline-none hover:bg-[var(--accent)] focus:bg-[var(--accent)] focus:ring-1 focus:ring-[var(--ring)]/40"
+        @change="onStartDate"
+      />
+      <span class="text-[var(--ink-3)]">→</span>
+      <input
+        type="date"
+        :value="trip.end_date ?? ''"
+        :min="trip.start_date || undefined"
+        aria-label="여행 종료일"
+        class="rounded-sm bg-transparent px-1.5 py-0.5 text-[13.5px] text-[var(--ink)] outline-none hover:bg-[var(--accent)] focus:bg-[var(--accent)] focus:ring-1 focus:ring-[var(--ring)]/40"
+        @change="onEndDate"
+      />
+    </div>
+    <div
+      v-else
+      class="flex items-center rounded-sm px-2 py-[5px] text-[13.5px] hover:bg-[var(--accent)]"
+    >
       {{ dateRange }}
     </div>
 
