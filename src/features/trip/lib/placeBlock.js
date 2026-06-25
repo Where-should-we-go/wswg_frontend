@@ -34,7 +34,8 @@ export function buildPlaceBlock(place, { visitDate = null, order = 1 } = {}) {
   block.title = place?.title ?? ''
   block.lat = place?.latitude ?? place?.mapY ?? null
   block.lng = place?.longitude ?? place?.mapX ?? null
-  if (place?.firstImage1) block.media = [{ type: 'PHOTO', url: place.firstImage1, metadata: {} }]
+  // 관광지 대표 이미지는 미디어(사진)에 자동 추가하지 않는다.
+  // 발자취에는 사용자가 실제로 업로드한 사진만 쌓이도록, media는 빈 상태로 둔다.
 
   const region = placeRegionLabel(place)
   block.properties = {
