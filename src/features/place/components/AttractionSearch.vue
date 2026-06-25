@@ -123,6 +123,8 @@ async function fetchResults() {
       sidoCode: query.sidoCode ?? undefined,
       gugunCode: query.gugunCode ?? undefined,
       contentTypeId: query.contentTypeIds.length ? query.contentTypeIds : undefined,
+      // 이 목록(S3 카드 그리드)은 대표 이미지가 있는 관광지만 노출 — count도 같은 기준.
+      hasImage: true,
       page,
       size: PAGE_SIZE,
     })
