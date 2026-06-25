@@ -53,7 +53,7 @@ export const BLOCK_KINDS = [
   { typeKey: "memo", koType: "메모", emoji: "📝", title: "메모", desc: "자유 텍스트" },
 ];
 
-function formatBudget(won) {
+export function formatBudget(won) {
   return `${Number(won).toLocaleString("ko-KR")}원`;
 }
 
@@ -120,11 +120,22 @@ export function transportOf(properties = {}) {
 // properties 객체 → 인라인 pill 목록 [{ key, emoji, text }] (시안 .pp).
 // region 은 meta 텍스트로, transport 는 이동 스트립으로 따로 빠지므로 여기선 제외.
 // 알려진 키는 전용 이모지/포맷, 그 외(예약번호 등)는 라벨 그대로(🔖).
+// AI 추천 내부 메타 — 데이터엔 보존하되 사용자에겐 노출하지 않는다(점수·출처·유사도 등).
+const HIDDEN_PROPERTY_KEYS = new Set([
+  "source",
+  "score",
+  "similarity",
+  "matchedCandidateId",
+  "matchedCandidateName",
+  "meal",
+]);
+
 export function propertyPills(properties = {}) {
   const pills = [];
   for (const [key, value] of Object.entries(properties)) {
     if (value === null || value === undefined || value === "") continue;
     if (key === "region" || key === "transport") continue; // meta / 스트립으로 분리
+    if (HIDDEN_PROPERTY_KEYS.has(key)) continue; // AI 내부 메타 — 비노출
     switch (key) {
       // ⚠ duration 문자열은 더 이상 properties 에 없음 — durationMin(오버라인) 이 정본.
       case "budget":

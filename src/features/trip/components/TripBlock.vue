@@ -13,6 +13,7 @@ import { GripVertical, Plus, MoreVertical, ImagePlus, Mic, Square } from '@lucid
 import { BlockTag } from '@/components/ui/block-tag'
 import { PropertyPill } from '@/components/ui/property-pill'
 import { CollabCaret } from '@/components/ui/collab-caret'
+import MediaLightbox from './MediaLightbox.vue'
 import {
   typeKeyOf,
   typeEmojiOf,
@@ -40,6 +41,8 @@ const emit = defineEmits([
   'dragend',
   'reorder-drop',
   'upload-media',
+  'delete-media',
+  'set-representative',
 ])
 
 const typeKey = computed(() => typeKeyOf(props.block.type))
@@ -88,29 +91,63 @@ watch(
   },
 )
 
+// uncontrolled + 포커스 중 DOM 미갱신(watch 가드)이라 조합 중에 커밋해도 IME 가 안 끊긴다.
+// → 한글 조합 중에도 라이브 반영(조합 완료까지 기다리지 않음).
 function onTitleInput(e) {
-  if (composing.value) return // 한글 조합 중엔 커밋 보류
   emit('edit-title', props.block.id, e.target.value)
 }
 function onCompositionEnd(e) {
   composing.value = false
-  emit('edit-title', props.block.id, e.target.value)
+  emit('edit-title', props.block.id, e.target.value) // 최종 확정 보정
 }
 
 // ── 같은 날 순서 재배치(드래그핸들 ⋮⋮) ─────────────────────
 // 핸들에서 드래그 시작, 다른 블록 위로 드롭하면 그 블록 앞으로 재배치(reorder).
 const reorderOver = ref(false)
-function onHandleDragStart() {
+// 드롭 위치: 포인터가 블록 상단 절반이면 'before'(위), 하단 절반이면 'after'(아래).
+const dropPos = ref('before')
+const rootEl = ref(null)
+const dragging = ref(false)
+function onDragOver(ev) {
+  if (props.readonly) return
+  reorderOver.value = true
+  const r = rootEl.value?.getBoundingClientRect()
+  if (r) dropPos.value = ev.clientY - r.top > r.height / 2 ? 'after' : 'before'
+}
+function onHandleDragStart(ev) {
+  // 드래그 고스트를 작은 핸들이 아니라 블록 카드 전체로 잡는다(노션식 반투명 미리보기가 따라옴).
+  // setDragImage 는 호출 시점의 렌더를 스냅샷 → opacity 흐리기는 이 뒤에 적용해 고스트엔 영향 없음.
+  if (ev.dataTransfer && rootEl.value) {
+    ev.dataTransfer.effectAllowed = 'move'
+    const r = rootEl.value.getBoundingClientRect()
+    ev.dataTransfer.setDragImage(rootEl.value, ev.clientX - r.left, ev.clientY - r.top)
+  }
+  dragging.value = true
   emit('dragstart', props.block.id)
+}
+function onHandleDragEnd() {
+  dragging.value = false
+  emit('dragend')
 }
 function onBlockDrop() {
   reorderOver.value = false
-  emit('reorder-drop', props.block.id)
+  emit('reorder-drop', props.block.id, dropPos.value)
 }
 
 // ── 미디어 업로드(E1) ─────────────────────────────────────
 const fileInput = ref(null)
 const dropActive = ref(false)
+// 썸네일 클릭 → 확대(라이트박스). 갤러리와 동일 컴포넌트(MediaLightbox).
+const previewMedia = ref(null)
+function deletePreview() {
+  const idx = media.value.indexOf(previewMedia.value)
+  if (idx !== -1) emit('delete-media', props.block.id, idx)
+  previewMedia.value = null // 삭제된 미디어이므로 라이트박스 닫기
+}
+function setRepresentativePreview() {
+  const idx = media.value.indexOf(previewMedia.value)
+  if (idx !== -1) emit('set-representative', props.block.id, idx)
+}
 
 function pickFiles() {
   fileInput.value?.click()
@@ -124,6 +161,23 @@ function onDrop(e) {
   dropActive.value = false
   const files = [...(e.dataTransfer?.files ?? [])].filter(isSupportedMediaFile)
   if (files.length) emit('upload-media', props.block.id, files)
+}
+// 미디어 드롭존은 "파일" 드래그일 때만 가로챈다(stop). 블록 reorder 드래그면 막지 않아
+// 이벤트가 블록으로 버블 → 블록 하단(=after 영역)에서도 순서/시간 끌어넣기가 동작한다.
+function isFileDrag(e) {
+  return !!e.dataTransfer && Array.from(e.dataTransfer.types || []).includes('Files')
+}
+function onMediaDragOver(e) {
+  if (props.readonly || !isFileDrag(e)) return
+  e.preventDefault()
+  e.stopPropagation()
+  dropActive.value = true
+}
+function onMediaDrop(e) {
+  if (props.readonly || !isFileDrag(e)) return
+  e.preventDefault()
+  e.stopPropagation()
+  onDrop(e)
 }
 
 function isSupportedMediaFile(file) {
@@ -198,15 +252,23 @@ onBeforeUnmount(() => {
 
 <template>
   <div
-    class="group relative flex gap-[11px] rounded-[7px] px-2 py-[9px] transition-colors"
+    ref="rootEl"
+    class="group relative flex gap-[11px] rounded-[7px] px-2 py-[9px] transition-[opacity,background-color] duration-150"
     :class="[
       editingByOther ? 'bg-[var(--selected-bg)]' : 'hover:bg-[var(--hover)]',
-      reorderOver ? 'ring-2 ring-[var(--brand)]' : '',
+      dragging ? 'opacity-40' : '',
     ]"
-    @dragover.prevent="!readonly && (reorderOver = true)"
+    @dragover.prevent="onDragOver"
     @dragleave="reorderOver = false"
     @drop.prevent="!readonly && onBlockDrop()"
   >
+    <!-- 드롭 위치 삽입 라인(노션식) — 상단 절반=위, 하단 절반=아래. -->
+    <span
+      v-if="reorderOver && !dragging"
+      class="pointer-events-none absolute left-0 right-0 z-10 h-[2.5px] rounded-full bg-[var(--brand)]"
+      :class="dropPos === 'after' ? '-bottom-px' : '-top-px'"
+      aria-hidden="true"
+    />
     <!-- 레일 점(타입색) -->
     <span
       class="absolute top-4 size-[9px] rounded-full bg-[var(--background)] ring-[3px] ring-[var(--background)]"
@@ -234,7 +296,7 @@ onBeforeUnmount(() => {
         aria-label="블록 이동·순서 변경"
         title="드래그해서 옮기기 · 순서 변경"
         @dragstart="onHandleDragStart"
-        @dragend="emit('dragend')"
+        @dragend="onHandleDragEnd"
       >
         <GripVertical class="size-[15px]" />
       </span>
@@ -287,16 +349,18 @@ onBeforeUnmount(() => {
         v-if="!readonly || media.length"
         class="mt-[9px] flex flex-wrap items-center gap-1.5 rounded-[9px] transition-colors"
         :class="dropActive ? 'bg-[var(--brand-soft)] p-1.5 ring-1 ring-[var(--brand)]' : ''"
-        @dragover.prevent.stop="!readonly && (dropActive = true)"
-        @dragleave.stop="dropActive = false"
-        @drop.prevent.stop="!readonly && onDrop($event)"
+        @dragover="onMediaDragOver"
+        @dragleave="dropActive = false"
+        @drop="onMediaDrop"
       >
         <!-- 기존 미디어 -->
         <div
           v-for="(m, i) in media"
           :key="i"
-          class="relative h-12 w-16 overflow-hidden rounded-[7px] border border-[var(--border)] bg-[linear-gradient(135deg,#cfe0f5,#e7d9c6)]"
-          :aria-label="mediaLabel(m)"
+          class="relative h-12 w-16 cursor-zoom-in overflow-hidden rounded-[7px] border border-[var(--border)] bg-[linear-gradient(135deg,#cfe0f5,#e7d9c6)]"
+          role="button"
+          :aria-label="`${mediaLabel(m)} 크게 보기`"
+          @click.stop="previewMedia = m"
         >
           <img
             v-if="m.url && m.type === 'PHOTO'"
@@ -377,5 +441,18 @@ onBeforeUnmount(() => {
     >
       <MoreVertical class="size-4" />
     </button>
+
+    <!-- 썸네일 클릭 확대 — 갤러리와 동일 컴포넌트. 편집 가능하면 삭제도 노출. -->
+    <Teleport to="body">
+      <MediaLightbox
+        :media="previewMedia"
+        :caption="block.title"
+        :can-delete="!readonly"
+        :can-set-representative="!readonly"
+        @close="previewMedia = null"
+        @delete="deletePreview"
+        @set-representative="setRepresentativePreview"
+      />
+    </Teleport>
   </div>
 </template>

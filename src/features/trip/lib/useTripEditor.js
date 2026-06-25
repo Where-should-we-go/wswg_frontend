@@ -7,7 +7,7 @@
 import { ref, computed, onMounted, onBeforeUnmount, getCurrentInstance } from 'vue'
 import { updateTrip } from '@/services/trips'
 import { typeKeyOf } from '@/features/trip/lib/blockMeta'
-import { timeToMinutes, packSchedule } from '@/features/trip/lib/calendar'
+import { timeToMinutes, minutesToTime, DEFAULT_DURATION_MIN } from '@/features/trip/lib/calendar'
 import { USE_MOCK } from '@/services/config'
 import * as authService from '@/services/auth'
 import { createPlanSocket, userIdFromToken } from '@/features/trip/lib/planSocket'
@@ -168,7 +168,7 @@ export function useTripEditor(initialTrip) {
   function sendOp(type, payload) {
     // payload 에 clientId 를 실어 보낸다(서버가 block/meta op 의 payload 를 그대로 echo →
     // 수신 측에서 자기 탭이 보낸 것인지 판별). block 안이 아니라 payload 최상위에 둠.
-    const withCid = { ...(payload ?? {}), clientId: myClientId }
+    const withCid = { ...payload, clientId: myClientId }
     if (socket && socket.send({ type, tripId: trip.value.trip_id, payload: withCid })) {
       syncState.value = 'saving' // 서버 ack 수신 시 synced
       return true
@@ -194,7 +194,7 @@ export function useTripEditor(initialTrip) {
     const b = findBlock(id)
     if (!b) return
     Object.assign(b, patch) // 로컬 즉시(캘린더·보드 등 다른 뷰도 함께 갱신)
-    const merged = { ...(livePatches.get(id) ?? {}), ...patch }
+    const merged = { ...livePatches.get(id), ...patch }
     livePatches.set(id, merged)
     clearTimeout(liveTimers.get(id))
     liveTimers.set(
@@ -229,7 +229,7 @@ export function useTripEditor(initialTrip) {
           block.properties = {}
           continue
         }
-        const props = { ...(block.properties ?? {}) }
+        const props = { ...block.properties }
         for (const [pk, pv] of Object.entries(value)) {
           if (pv === null || pv === '' || (typeof pv === 'string' && !pv.trim())) delete props[pk]
           else props[pk] = pv
@@ -292,7 +292,7 @@ export function useTripEditor(initialTrip) {
     } else if (type === 'meta.update') {
       const patch = msg.payload?.patch ?? {}
       if ('title' in patch) trip.value.title = patch.title
-      trip.value.data.meta = { ...(trip.value.data.meta ?? {}), ...patch }
+      trip.value.data.meta = { ...trip.value.data.meta, ...patch }
     }
   }
 
@@ -416,39 +416,60 @@ export function useTripEditor(initialTrip) {
   // 순차 재패킹 — 순서(orderedIds)대로 시간 있는 블록을 겹침 없이 이어 배치하고,
   // 시간 미정 블록은 맨 뒤 수동 order 로 둔다. overrides[id]=true/false 로 시간 부여/해제(양방향).
   //   앵커 = 그 날의 가장 이른 기존 시각(없으면 09:00) → 하루 시작 시각은 유지.
-  function repackDay(date, orderedIds, overrides = {}) {
+  // 끌어넣기(insert-between): 옮긴 블록만 새 이웃 사이 시간으로 두고 나머지 시간은 보존한다.
+  // 앞 블록이 있으면 그 끝에 붙이고, 없으면 다음 블록 직전에 둔다. 겹치면 그 뒤만 밀어낸다(cascade).
+  // draggedTimed: 드롭 지점이 시간 있는 블록 옆이면 true(시각 부여), 미정 영역이면 false(시각 해제).
+  function repackDay(date, orderedIds, draggedId, draggedTimed) {
     const blocks = orderedIds.map((id) => findBlock(id)).filter((b) => b && b.visitDate === date)
-    const timed = []
-    const untimed = []
-    for (const b of blocks) {
-      const isTimed = b.id in overrides ? overrides[b.id] : b.time != null
-      ;(isTimed ? timed : untimed).push(b)
-    }
-    let anchorMin = null
-    for (const b of timed) {
-      const t = timeToMinutes(b.time)
-      if (t != null) anchorMin = anchorMin == null ? t : Math.min(anchorMin, t)
-    }
-    if (anchorMin == null) anchorMin = 9 * 60
-    const timeById = Object.fromEntries(
-      packSchedule(timed, { anchorMin }).map((p) => [p.id, p.time]),
-    )
-    for (const b of timed) {
-      const nt = timeById[b.id]
-      if (b.time !== nt) {
-        b.time = nt
-        pushUpdate(b.id, { time: nt })
+    const isTimed = (b) => (b.id === draggedId ? draggedTimed : b.time != null)
+    const timed = blocks.filter(isTimed)
+    const untimed = blocks.filter((b) => !isTimed(b))
+    const dur = (b) =>
+      b.durationMin != null && Number(b.durationMin) > 0 ? Number(b.durationMin) : DEFAULT_DURATION_MIN
+
+    const i = timed.findIndex((b) => b.id === draggedId)
+    if (i !== -1) {
+      // 옮긴 블록의 시작 시각: 앞 블록 끝 → 없으면 다음 블록 직전 → 둘 다 없으면 기존/09:00.
+      const prev = i > 0 ? timed[i - 1] : null
+      const next = i < timed.length - 1 ? timed[i + 1] : null
+      let draggedStart
+      if (prev && timeToMinutes(prev.time) != null) {
+        draggedStart = timeToMinutes(prev.time) + dur(prev)
+      } else if (next && timeToMinutes(next.time) != null) {
+        draggedStart = Math.max(0, timeToMinutes(next.time) - dur(timed[i]))
+      } else {
+        draggedStart = timeToMinutes(timed[i].time) ?? 9 * 60
       }
+      // 앞쪽 블록은 시간 보존, 옮긴 지점부터는 겹칠 때만 뒤로 밀기(cascade).
+      let cursor = -1
+      timed.forEach((b, j) => {
+        let start
+        if (j < i) {
+          start = timeToMinutes(b.time) ?? Math.max(0, cursor)
+        } else if (j === i) {
+          start = Math.max(draggedStart, cursor < 0 ? draggedStart : cursor)
+        } else {
+          const existing = timeToMinutes(b.time)
+          start = existing != null ? Math.max(existing, cursor) : Math.max(0, cursor)
+        }
+        const nt = minutesToTime(Math.min(start, 1439))
+        if (b.time !== nt) {
+          b.time = nt
+          pushUpdate(b.id, { time: nt })
+        }
+        cursor = start + dur(b)
+      })
     }
-    untimed.forEach((b, i) => {
+
+    untimed.forEach((b, idx) => {
       const patch = {}
       if (b.time != null) {
         b.time = null
         patch.time = null
       }
-      if ((b.order ?? 0) !== i + 1) {
-        b.order = i + 1
-        patch.order = i + 1
+      if ((b.order ?? 0) !== idx + 1) {
+        b.order = idx + 1
+        patch.order = idx + 1
       }
       if (Object.keys(patch).length) pushUpdate(b.id, patch)
     })
@@ -468,12 +489,28 @@ export function useTripEditor(initialTrip) {
   }
 
   // 미디어 append(E1 업로드). 업로드된 { type, url, metadata } 를 블록 media[] 끝에 더한다.
-  function addMedia(blockId, media) {
+  // persist=false: 로컬에만 반영(서버가 이미 저장한 경우). 미디어 업로드는 백엔드 업로드
+  // 엔드포인트가 trip.data 에 직접 저장하므로, FE 가 또 block.update 로 커밋하면 2장으로 중복된다.
+  function addMedia(blockId, media, persist = true) {
     const b = findBlock(blockId)
     if (!b) return
     if (!Array.isArray(b.media)) b.media = []
+    // 실시간(WS) 브로드캐스트로 같은 미디어가 먼저 들어올 수 있으므로 id 로 중복 제거.
+    if (media.id != null && b.media.some((m) => m.id === media.id)) return
     b.media.push(media)
-    // media 는 통째 교체 규약 → 현재 배열 전체를 patch.media 로 전송.
+    if (persist) {
+      // media 는 통째 교체 규약 → 현재 배열 전체를 patch.media 로 전송.
+      commitEdit('block.update', { id: blockId, patch: { media: b.media } }, blockId)
+    }
+  }
+
+  // 미디어 삭제 — 로컬 제거 후 media 배열 통째로 block.update op 전송(addMedia 와 동일 규약).
+  // raw PUT 만 하면 collab plan-state(Redis)에 미디어가 남아 flush 워커가 되살리므로 op 로 보낸다.
+  // 소켓 미연결이면 commitEdit 가 PUT(scheduleSave)로 폴백. OCI 객체 자체 정리는 후속 과제.
+  function removeMedia(blockId, mediaIndex) {
+    const b = findBlock(blockId)
+    if (!b || !Array.isArray(b.media) || mediaIndex < 0 || mediaIndex >= b.media.length) return
+    b.media.splice(mediaIndex, 1)
     commitEdit('block.update', { id: blockId, patch: { media: b.media } }, blockId)
   }
 
@@ -520,20 +557,31 @@ export function useTripEditor(initialTrip) {
     repackDay,
     reorderWithin,
     addMedia,
+    removeMedia,
     setRepresentative,
     setTitle,
   }
 }
 
 // startDate~endDate(포함) 사이 "YYYY-MM-DD" 배열. 한쪽이라도 없으면 빈 배열.
+// 로컬 자정으로 파싱하므로 포맷도 로컬 기준으로 한다(toISOString=UTC 를 쓰면 KST 등에서
+// 하루 밀려 Day1 이 전날로 잡히는 버그가 생긴다).
 export function dateRange(startDate, endDate) {
   const out = []
   if (!startDate || !endDate) return out
   const cur = new Date(startDate + 'T00:00:00')
   const end = new Date(endDate + 'T00:00:00')
   while (cur <= end) {
-    out.push(cur.toISOString().slice(0, 10))
+    out.push(toLocalIsoDate(cur))
     cur.setDate(cur.getDate() + 1)
   }
   return out
+}
+
+// 로컬 시간대 기준 "YYYY-MM-DD" (toISOString 의 UTC 변환 회피).
+function toLocalIsoDate(d) {
+  const year = d.getFullYear()
+  const month = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
 }

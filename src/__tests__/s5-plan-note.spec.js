@@ -17,10 +17,23 @@ vi.mock('@/services/attractions', () => ({
 vi.mock('@/services/groups', () => ({
   getGroups: vi.fn(async () => []),
 }))
-const autoGeneratePlan = vi.fn(async () => ({ tripId: 99 }))
-vi.mock('@/services/trips', () => ({
-  autoGeneratePlan: (...args) => autoGeneratePlan(...args),
+// 폼 제출 시 message 합성만 검증(이후 추천 선택 단계로 전환). 추천/생성은 별도 스펙에서.
+const createTripCandidates = vi.fn(async () => ({
+  sessionId: 's1',
+  reply: '후보를 골라봤어요.',
+  candidates: [{ candidateId: 'c1', name: '경복궁', regionHint: '서울 종로구' }],
 }))
+const recommendTrip = vi.fn(async () => ({
+  recommendations: [{ contentId: 1, title: '경복궁', contentTypeId: 12, sidoName: '서울', gugunName: '종로구', similarity: 0.9 }],
+}))
+vi.mock('@/services/aiTrip', async (importOriginal) => {
+  const actual = await importOriginal()
+  return {
+    ...actual, // buildTripMessage 등 순수 헬퍼는 실제 구현 사용.
+    createTripCandidates: (...args) => createTripCandidates(...args),
+    recommendTrip: (...args) => recommendTrip(...args),
+  }
+})
 
 function mountView() {
   return mount(PlanNewView, { global: { stubs: { 'router-link': true } } })
@@ -28,7 +41,7 @@ function mountView() {
 
 describe('S5 자유 서술 입력', () => {
   beforeEach(() => {
-    autoGeneratePlan.mockClear()
+    createTripCandidates.mockClear()
     push.mockClear()
   })
 
@@ -41,7 +54,7 @@ describe('S5 자유 서술 입력', () => {
     expect(wrapper.text()).toContain('14/500')
   })
 
-  it('작성한 내용이 자동 생성 요청 본문(note)에 담겨 전달된다', async () => {
+  it('작성한 내용이 후보 생성 message 에 담겨 전달된다', async () => {
     const wrapper = mountView()
     await flushPromises()
 
@@ -61,8 +74,13 @@ describe('S5 자유 서술 입력', () => {
     await genBtn.trigger('click')
     await flushPromises()
 
-    expect(autoGeneratePlan).toHaveBeenCalledTimes(1)
-    // 앞뒤 공백은 trim 되어 전달된다.
-    expect(autoGeneratePlan.mock.calls[0][0]).toMatchObject({ note: '맛집 위주로 부탁해요' })
+    expect(createTripCandidates).toHaveBeenCalledTimes(1)
+    // 자유서술은 trim 되어 합성된 자연어 message 에 포함된다.
+    const { message } = createTripCandidates.mock.calls[0][0]
+    expect(message).toContain('맛집 위주로 부탁해요')
+    expect(message).not.toContain('  맛집')
+    // 추천 선택 화면으로 전환된다(아직 라우팅하지 않음).
+    expect(push).not.toHaveBeenCalled()
+    expect(wrapper.text()).toContain('어디를 둘러볼까요?')
   })
 })

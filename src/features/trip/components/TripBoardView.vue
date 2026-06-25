@@ -14,7 +14,7 @@ defineProps({
   days: { type: Array, default: () => [] },
 })
 
-const emit = defineEmits(['move-block', 'add-block', 'edit-title'])
+const emit = defineEmits(['board-drop', 'add-block', 'edit-title'])
 
 // 제목 편집 중인 카드 — 그 동안은 드래그를 끈다(입력과 충돌 방지).
 const editingId = ref(null)
@@ -26,7 +26,9 @@ function dateLabel(date) {
 }
 
 const draggingId = ref(null)
-const overDate = ref(null)
+const overDate = ref(null) // 빈 영역(맨 끝) 드롭 대상 컬럼
+const overCardId = ref(null) // 삽입 라인을 띄울 대상 카드
+const cardPos = ref('before') // 대상 카드의 위/아래
 
 function onDragStart(block) {
   draggingId.value = block.id
@@ -34,9 +36,29 @@ function onDragStart(block) {
 function onDragEnd() {
   draggingId.value = null
   overDate.value = null
+  overCardId.value = null
 }
-function onDrop(date) {
-  if (draggingId.value) emit('move-block', draggingId.value, date)
+// 카드 위로: 상단/하단 절반으로 before/after 판정 + 삽입 라인. (자기 자신엔 표시 안 함)
+function onCardDragOver(e, block) {
+  if (!draggingId.value || draggingId.value === block.id) return
+  const r = e.currentTarget.getBoundingClientRect()
+  cardPos.value = e.clientY - r.top > r.height / 2 ? 'after' : 'before'
+  overCardId.value = block.id
+  overDate.value = null
+}
+function onCardDrop(date, block) {
+  if (draggingId.value && draggingId.value !== block.id) {
+    emit('board-drop', draggingId.value, date, block.id, cardPos.value)
+  }
+  onDragEnd()
+}
+// 컬럼 빈 영역: 맨 끝에 추가.
+function onColDragOver(date) {
+  overDate.value = date
+  overCardId.value = null
+}
+function onColDrop(date) {
+  if (draggingId.value) emit('board-drop', draggingId.value, date, null, 'append')
   onDragEnd()
 }
 </script>
@@ -56,10 +78,10 @@ function onDrop(date) {
         v-for="d in days"
         :key="d.date"
         class="flex w-[256px] shrink-0 flex-col rounded-[var(--radius-win)] border border-[var(--border)] bg-[var(--sunken)] p-2.5 transition-colors"
-        :class="overDate === d.date ? 'ring-2 ring-[var(--brand)]' : ''"
-        @dragover.prevent="overDate = d.date"
+        :class="overDate === d.date && !overCardId ? 'ring-2 ring-[var(--brand)]' : ''"
+        @dragover.prevent="onColDragOver(d.date)"
         @dragleave="overDate === d.date && (overDate = null)"
-        @drop.prevent="onDrop(d.date)"
+        @drop.prevent="onColDrop(d.date)"
       >
         <!-- 컬럼 헤더 -->
         <div class="mb-2 flex items-baseline gap-2 px-1">
@@ -74,14 +96,23 @@ function onDrop(date) {
             v-for="b in d.blocks"
             :key="b.id"
             :draggable="editingId !== b.id"
-            class="rounded-[var(--radius)] border border-[var(--border)] bg-[var(--background)] p-2.5 shadow-[0_1px_2px_rgba(0,0,0,0.04)]"
+            class="relative rounded-[var(--radius)] border border-[var(--border)] bg-[var(--background)] p-2.5 shadow-[0_1px_2px_rgba(0,0,0,0.04)]"
             :class="[
               draggingId === b.id ? 'opacity-40' : '',
               editingId === b.id ? '' : 'cursor-grab active:cursor-grabbing',
             ]"
             @dragstart="onDragStart(b)"
             @dragend="onDragEnd"
+            @dragover.prevent.stop="onCardDragOver($event, b)"
+            @drop.prevent.stop="onCardDrop(d.date, b)"
           >
+            <!-- 삽입 라인(노션식) — 대상 카드 위/아래. -->
+            <span
+              v-if="overCardId === b.id && draggingId !== b.id"
+              class="pointer-events-none absolute inset-x-0 z-10 h-[2.5px] rounded-full bg-[var(--brand)]"
+              :class="cardPos === 'after' ? '-bottom-[5px]' : '-top-[5px]'"
+              aria-hidden="true"
+            />
             <div class="flex items-start gap-1.5">
               <span aria-hidden="true">{{ typeEmojiOf(b.type) }}</span>
               <!-- 제목 인라인 편집(빈 메모·이동도 바로 작성) -->

@@ -1,12 +1,12 @@
 <script setup>
 // TripViewTabs — "하나의 원본 → 여러 뷰" 뷰 탭 (디자인시스템.md §6.2, 시안 §B `.views`).
-// 탭: 📅 일정 / 🖼️ 갤러리 / 🗺️ 지도 / 📋 보드 (선택 밑줄 --brand).
+// 탭: 📅 일정 / 🖼️ 미디어 / 🗺️ 지도 / 📋 보드 (선택 밑줄 --brand).
 // 각 뷰는 부모가 슬롯으로 주입(같은 원본 items 공유).
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 
 const TABS = [
   { value: 'schedule', emoji: '📅', label: '일정' },
-  { value: 'gallery', emoji: '🖼️', label: '갤러리' },
+  { value: 'gallery', emoji: '🖼️', label: '미디어' },
   { value: 'map', emoji: '🗺️', label: '지도' },
   { value: 'board', emoji: '📋', label: '보드' },
 ]

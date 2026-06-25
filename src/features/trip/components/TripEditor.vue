@@ -2,10 +2,10 @@
 // TripEditor — 여행 계획 블록 에디터 최상위 (S6 협업 편집, 디자인시스템.md §6.2/§6.3).
 // 앱 셸 안에서 본문 캔버스만 그린다(사이드바·토픽바 없음).
 //   Z2 페이지 헤더: 커버 · 이모지 · 제목(인라인 편집) · 속성 테이블 + 협업 툴바(AvatarStack·동기화 배지).
-//   Z3 뷰 탭: 📅 일정 / 🖼️ 갤러리 / 🗺️ 지도 / 📋 보드.
+//   Z3 뷰 탭: 📅 일정 / 🖼️ 미디어 / 🗺️ 지도 / 📋 보드.
 //   일정 뷰: 보조 토글로 레일 ↔ 캘린더 전환.
 // 편집은 useTripEditor 로컬 낙관적 → updateTrip 전체 저장. 실시간(WS)은 mock stub.
-import { ref, reactive, computed } from 'vue'
+import { ref, reactive, computed, onMounted, watch } from 'vue'
 import { toast } from 'vue-sonner'
 import { uploadMedia } from '@/services/trips'
 import { getAttraction } from '@/services/attractions'
@@ -31,6 +31,7 @@ import TripBoardView from './TripBoardView.vue'
 import AttractionPickerDialog from './AttractionPickerDialog.vue'
 import { useTripEditor } from '@/features/trip/lib/useTripEditor'
 import { BLOCK_KINDS, typeEmojiOf } from '@/features/trip/lib/blockMeta'
+import { setTripTitleOverride } from '@/stores/tripUiState'
 
 const props = defineProps({
   trip: { type: Object, required: true },
@@ -43,14 +44,34 @@ const emit = defineEmits(['delete'])
 const ed = useTripEditor(props.trip)
 
 // 여행 제목 라이브 입력 — 한글 IME 조합 중에는 커밋 보류(조합 끝나면 한 번에).
+// uncontrolled input: :value 로 묶으면 조합 중 다른 리렌더가 값을 덮어써 글자가 누락된다.
+// 마운트 시 1회 세팅하고, 외부(원격/트립 전환) 변경은 포커스 중이 아닐 때만 DOM 에 반영한다.
+const titleEl = ref(null)
 const titleComposing = ref(false)
+onMounted(() => {
+  if (titleEl.value) titleEl.value.value = ed.trip.value.title ?? ''
+})
+watch(
+  () => ed.trip.value.title,
+  (t) => {
+    const el = titleEl.value
+    if (!el || document.activeElement === el) return
+    if (el.value !== (t ?? '')) el.value = t ?? ''
+  },
+)
+function commitTitle(value) {
+  ed.setTitle(value)
+  // 사이드바 '내 여행' 목록은 별도 출처라 저장 왕복 전엔 안 바뀜 → 공유 override 로 즉시 반영.
+  setTripTitleOverride(ed.trip.value.trip_id, value)
+}
+// uncontrolled + 포커스 중 DOM 미갱신(watch 가드)이라 조합 중에 커밋해도 IME 가 안 끊긴다.
+// → 한글 조합 중에도 제목이 사이드바/모델에 라이브 반영(조합 완료까지 기다리지 않음).
 function onTitleInput(e) {
-  if (titleComposing.value) return
-  ed.setTitle(e.target.value)
+  commitTitle(e.target.value)
 }
 function onTitleCompositionEnd(e) {
   titleComposing.value = false
-  ed.setTitle(e.target.value)
+  commitTitle(e.target.value) // 최종 확정 보정
 }
 
 // 일정 뷰 보조 토글: 'rail' | 'calendar'
@@ -74,9 +95,10 @@ function onDropOnDay(date) {
   draggingBlockId.value = null
   reorderHandled.value = false
 }
-// 같은 날 안에서 targetId 블록 위로 드롭 → 끄는 블록을 target 앞으로 + 순차 재패킹(시간 재계산).
-// 양방향: 시간 있는 블록 위에 놓으면 시간 부여(스케줄), 시간 미정 블록 위에 놓으면 시간 해제.
-function onReorderDrop(targetId) {
+// 같은 날 안에서 targetId 블록의 위/아래로 드롭 → 끄는 블록을 그 위치로 + 순차 재패킹(시간 재계산).
+// pos: 'before'(위) | 'after'(아래) — 마지막 블록 아래로 놓으면 맨 끝에 붙는다.
+// 양방향: 시간 있는 블록 옆에 놓으면 시간 부여(스케줄), 시간 미정 블록 옆에 놓으면 시간 해제.
+function onReorderDrop(targetId, pos = 'before') {
   const dragId = draggingBlockId.value
   if (!dragId || dragId === targetId) return
   const drag = ed.findBlock(dragId)
@@ -87,20 +109,75 @@ function onReorderDrop(targetId) {
   if (!day) return
   const ordered = day.blocks.map((b) => b.id).filter((id) => id !== dragId)
   const at = ordered.indexOf(targetId)
-  ordered.splice(at < 0 ? ordered.length : at, 0, dragId)
-  ed.repackDay(drag.visitDate, ordered, { [dragId]: target.time != null })
+  const insertAt = at < 0 ? ordered.length : pos === 'after' ? at + 1 : at
+  ordered.splice(insertAt, 0, dragId)
+  // 끌어넣기: 옮긴 블록만 새 위치 시간으로, 나머지 시간은 보존. 시각 유무는 대상 블록을 따른다.
+  ed.repackDay(drag.visitDate, ordered, dragId, target.time != null)
+}
+
+// 보드(칸반) 드롭: dragId 를 date 컬럼의 targetId 위/아래(또는 맨 끝)로 끼워넣는다.
+// 다른 날이면 먼저 그 날로 옮긴 뒤, 타임라인과 동일한 끌어넣기 시간 규칙(repackDay)을 적용한다.
+function onBoardDrop(dragId, date, targetId, pos) {
+  const drag = ed.findBlock(dragId)
+  if (!drag || dragId === targetId) return
+  if (drag.visitDate !== date) ed.moveBlockToDate(dragId, date) // 다른 컬럼 → 그 날로 이동(visitDate 커밋)
+  const day = ed.days.value.find((d) => d.date === date)
+  if (!day) return
+  const ordered = day.blocks.map((b) => b.id).filter((id) => id !== dragId)
+  let insertAt
+  let draggedTimed
+  if (targetId) {
+    const at = ordered.indexOf(targetId)
+    insertAt = at < 0 ? ordered.length : pos === 'after' ? at + 1 : at
+    const target = ed.findBlock(targetId)
+    draggedTimed = target ? target.time != null : drag.time != null
+  } else {
+    // 컬럼 빈 영역(맨 끝): 그 날에 시간 있는 블록이 있으면 시각 부여, 아니면 dragId 의 기존 상태.
+    insertAt = ordered.length
+    draggedTimed = ordered.some((id) => ed.findBlock(id)?.time != null) || drag.time != null
+  }
+  ordered.splice(insertAt, 0, dragId)
+  ed.repackDay(date, ordered, dragId, draggedTimed)
 }
 
 // ── 미디어 업로드(E1) — 블록당 업로드 중 카운트로 스켈레톤 표시 ──
 const uploading = reactive({})
+// 업로드 실패/거부 사유를 사용자에게 알리는 모달.
+const uploadError = ref(null)
+// 사진·동영상만, 파일당 20MB 이하(백엔드 multipart 한도와 맞춤).
+const MAX_UPLOAD_BYTES = 20 * 1024 * 1024
+
+// 업로드 전 클라이언트 검증 — 통과하면 mediaType(PHOTO/VIDEO/AUDIO) 반환, 아니면 사유 문자열.
+function validateUpload(file) {
+  const isImage = file.type?.startsWith('image/')
+  const isVideo = file.type?.startsWith('video/')
+  const isAudio = file.type?.startsWith('audio/')
+  if (!isImage && !isVideo && !isAudio) {
+    return {
+      error: `'${file.name}'은(는) 지원하지 않는 형식이에요. 사진·동영상·음성만 올릴 수 있어요.`,
+    }
+  }
+  if (file.size > MAX_UPLOAD_BYTES) {
+    const mb = (file.size / (1024 * 1024)).toFixed(1)
+    return { error: `'${file.name}'은(는) 너무 커요(${mb}MB). 파일당 20MB 이하만 올릴 수 있어요.` }
+  }
+  return { mediaType: mediaTypeOf(file) }
+}
+
 async function onUploadMedia(blockId, files) {
   for (const file of files) {
+    const checked = validateUpload(file)
+    if (checked.error) {
+      uploadError.value = checked.error // 형식·용량 위반 → 모달
+      continue
+    }
     uploading[blockId] = (uploading[blockId] ?? 0) + 1
     const mediaType = mediaTypeOf(file)
     try {
       const res = await uploadMedia(ed.trip.value.trip_id, blockId, file)
       // mock 은 빈 url 을 주므로, 미리보기 objectURL 로 폴백(흐름·UI 동작 우선).
       const url = res?.mediaUrl || res?.url || URL.createObjectURL(file)
+      // id 로 중복 제거(실시간 broadcast 와 겹쳐도 1장).
       ed.addMedia(blockId, {
         id: res?.mediaId,
         type: res?.mediaType ?? mediaType,
@@ -108,8 +185,9 @@ async function onUploadMedia(blockId, files) {
         metadata: res?.metadata ?? {},
       })
       toast.success(`${mediaLabel(mediaType)}을(를) 더했어요`)
-    } catch {
-      toast.error('파일을 올리지 못했어요. 잠시 후 다시 시도해 주세요')
+    } catch (err) {
+      // 서버 사유(형식/용량/저장 실패 등)를 그대로 모달에 표시.
+      uploadError.value = err?.message || '파일을 올리지 못했어요. 잠시 후 다시 시도해 주세요.'
     } finally {
       uploading[blockId] = Math.max(0, (uploading[blockId] ?? 1) - 1)
       if (uploading[blockId] === 0) delete uploading[blockId]
@@ -238,6 +316,10 @@ function onSetRepresentative(blockId, mediaIndex) {
   ed.setRepresentative(blockId, mediaIndex)
   toast.success('대표 사진으로 선정했어요')
 }
+async function onDeleteMedia(blockId, mediaIndex) {
+  await ed.removeMedia(blockId, mediaIndex)
+  toast.success('사진을 삭제했어요')
+}
 
 // 모바일 블록 추가 바텀시트
 const addSheetOpen = ref(false)
@@ -295,9 +377,9 @@ function syncLabel() {
     <!-- 페이지 아이콘 -->
     <div class="-mt-[52px] mb-2 pl-1 text-[46px] leading-none">{{ ed.trip.value.icon }}</div>
 
-    <!-- 타이틀(라이브 인라인 편집 — 한글 IME 조합 가드) -->
+    <!-- 타이틀(라이브 인라인 편집 — uncontrolled, 한글 IME 조합 가드) -->
     <input
-      :value="ed.trip.value.title"
+      ref="titleEl"
       type="text"
       class="mt-[18px] mb-3.5 w-full bg-transparent text-[30px] font-extrabold tracking-[-0.03em] outline-none sm:text-[38px]"
       placeholder="여행 제목"
@@ -371,6 +453,8 @@ function syncLabel() {
             @drop-on-day="onDropOnDay"
             @reorder-drop="onReorderDrop"
             @upload-media="onUploadMedia"
+            @delete-media="onDeleteMedia"
+            @set-representative="onSetRepresentative"
           />
         </template>
 
@@ -385,9 +469,13 @@ function syncLabel() {
         />
       </template>
 
-      <!-- 🖼️ 갤러리 -->
+      <!-- 🖼️ 미디어 -->
       <template #gallery>
-        <TripGalleryView :items="ed.items.value" @set-representative="onSetRepresentative" />
+        <TripGalleryView
+          :items="ed.items.value"
+          @set-representative="onSetRepresentative"
+          @delete-media="onDeleteMedia"
+        />
       </template>
 
       <!-- 🗺️ 지도 -->
@@ -403,7 +491,7 @@ function syncLabel() {
       <template #board>
         <TripBoardView
           :days="ed.days.value"
-          @move-block="ed.moveBlockToDate"
+          @board-drop="onBoardDrop"
           @add-block="onAddBlock"
           @edit-title="(id, t) => ed.patchBlockLive(id, { title: t })"
         />
@@ -582,6 +670,19 @@ function syncLabel() {
         <DialogFooter>
           <Button variant="ghost" @click="confirmDeleteOpen = false">취소</Button>
           <Button variant="destructive" @click="emit('delete')">삭제</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+
+    <!-- 업로드 실패/거부 안내 모달 -->
+    <Dialog :open="uploadError != null" @update:open="(v) => !v && (uploadError = null)">
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>사진·동영상을 올리지 못했어요</DialogTitle>
+        </DialogHeader>
+        <p class="text-[14px] text-[var(--ink-2)]">{{ uploadError }}</p>
+        <DialogFooter>
+          <Button @click="uploadError = null">확인</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

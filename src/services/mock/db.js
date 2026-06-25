@@ -395,3 +395,78 @@ export const REGION_MEDIA = {
   ],
   6: [],
 }
+
+// ── AI 후보 선택 기반 여행 추천(목) — backend /api/ai/* 흉내 ────
+// 실제 흐름: ① 자연어 → AI 후보 N개  ② 선택 후보 → pgvector 실제 관광지 추천
+// ③ 추천 → trips.data.items 로 여행 생성. 목에선 ATTRACTIONS 풀로 흉내낸다.
+const aiSessions = {} // sessionId -> { message, candidates(내부용 _contentId 포함) }
+let aiSessionSeq = 0
+
+// ① 후보 생성. ATTRACTIONS 앞에서 count 개를 후보처럼 변환.
+export function makeAiCandidates(message, count = 8) {
+  const sessionId = `mock-ai-${++aiSessionSeq}`
+  const n = Math.max(1, Math.min(count, ATTRACTIONS.length))
+  const candidates = ATTRACTIONS.slice(0, n).map((a, i) => ({
+    candidateId: `c${i + 1}`,
+    name: a.title,
+    regionHint: `${a.sidoName} ${a.gugunName}`,
+    description: (a.overview ?? '').slice(0, 45),
+    reason: '입력하신 분위기와 잘 어울리는 곳이에요.',
+    _contentId: a.contentId, // 내부 매칭용(응답에서는 제거).
+  }))
+  aiSessions[sessionId] = { message, candidates }
+  return {
+    sessionId,
+    reply: '입력하신 취향으로 후보를 골라봤어요.',
+    candidates: candidates.map(({ _contentId, ...rest }) => rest),
+    nextQuestion: '이 중 마음에 드는 후보를 골라주세요.',
+  }
+}
+
+// 관광지 → 추천(backend AiTripRecommendationDto 모양: 좌표·지역·타입 포함).
+function recFromAttraction(a, i, matchedCandidate) {
+  return {
+    contentId: a.contentId,
+    title: a.title,
+    contentTypeId: a.contentTypeId ?? null,
+    sidoCode: a.sidoCode ?? null,
+    sidoName: a.sidoName ?? null,
+    gugunCode: a.gugunCode ?? null,
+    gugunName: a.gugunName ?? null,
+    firstImage1: a.firstImage1 ?? '',
+    latitude: a.mapY ?? null,
+    longitude: a.mapX ?? null,
+    addr1: a.addr1 ?? '',
+    distanceMeters: null,
+    similarity: Number((0.92 - i * 0.03).toFixed(2)),
+    score: Number((0.86 - i * 0.03).toFixed(2)),
+    matchedCandidateId: matchedCandidate?.candidateId ?? null,
+    matchedCandidateName: matchedCandidate?.name ?? null,
+  }
+}
+
+// 선택 후보 → 실제 관광지 추천 목록(내부 헬퍼).
+// contentTypeId 가 있으면 해당 타입 풀(예: 음식점)에서, 없으면 후보 1개당 1건.
+function aiRecommendList(sessionId, selectedIds = [], limit = 10, contentTypeId = null) {
+  if (contentTypeId != null) {
+    let pool = ATTRACTIONS.filter((a) => a.contentTypeId === contentTypeId)
+    if (pool.length === 0) pool = ATTRACTIONS // mock 풀에 해당 타입이 없으면 아무거나(끼니 채움용).
+    return pool.slice(0, limit).map((a, i) => recFromAttraction(a, i, null))
+  }
+  const sess = aiSessions[sessionId]
+  const picked = (sess?.candidates ?? []).filter((c) => selectedIds.includes(c.candidateId))
+  return picked.slice(0, limit).map((c, i) => {
+    const a = ATTRACTIONS.find((x) => x.contentId === c._contentId) ?? {}
+    return recFromAttraction({ ...a, title: c.name }, i, c)
+  })
+}
+
+// ② 선택 후보 기반 추천. contentTypeId 로 타입(음식점 등) 필터 가능.
+export function makeAiRecommendations(sessionId, selectedIds = [], limit = 10, contentTypeId = null) {
+  return {
+    sessionId,
+    reply: '선택한 취향과 가까운 실제 관광지를 정리했어요.',
+    recommendations: aiRecommendList(sessionId, selectedIds, limit, contentTypeId),
+    nextQuestion: '이대로 여행 계획을 만들까요?',
+  }
+}

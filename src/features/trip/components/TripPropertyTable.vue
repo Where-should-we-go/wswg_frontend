@@ -5,6 +5,7 @@
 import { computed } from "vue";
 import { Calendar, MapPin, Users, Palette, Wallet } from "@lucide/vue";
 import { BlockTag } from "@/components/ui/block-tag";
+import { formatBudget } from "@/features/trip/lib/blockMeta";
 
 const props = defineProps({
   trip: { type: Object, required: true },
@@ -34,6 +35,17 @@ const styleTags = computed(() =>
 );
 
 const members = computed(() => props.trip.members ?? []);
+
+// 예산: 블록별 properties.budget 합계를 라이브로 보여준다(블록 예산을 더하면 즉시 반영).
+// 트립 레벨 budgetLabel(메타)이 있으면 그걸 우선.
+const budgetText = computed(() => {
+  if (props.trip.budgetLabel) return props.trip.budgetLabel;
+  const total = (props.trip.data?.items ?? []).reduce(
+    (sum, it) => sum + (Number(it.properties?.budget) || 0),
+    0,
+  );
+  return total > 0 ? formatBudget(total) : "미정";
+});
 
 // AvatarStack 의 --collab-* 라운드로빈과 일치시키기 위한 fallback.
 const ROTATION = ["var(--collab-1)", "var(--collab-2)", "var(--collab-3)"];
@@ -100,7 +112,7 @@ function memberColor(m, i) {
       <Wallet class="size-4 text-[var(--ink-3)]" /> 예산
     </div>
     <div class="flex items-center rounded-sm px-2 py-[5px] text-[13.5px] text-[var(--ink-2)] hover:bg-[var(--accent)]">
-      {{ trip.budgetLabel }}
+      {{ budgetText }}
     </div>
   </div>
 </template>

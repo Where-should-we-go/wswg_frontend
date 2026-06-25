@@ -1,17 +1,27 @@
 <script setup>
 // S5 여행 자동 생성 (/plans/new) — 담당 A5.
-// 앱 셸 안에서 본문 캔버스만 렌더. 지역·기간·인원·스타일 칩 → "자동 생성 ✨" →
-// 진행 인디케이터 오버레이 → autoGeneratePlan → /trips/{tripId} 이동.
+// backend #56 추천 기반 흐름을 한 화면 2단계로 연결한다.
+//   form   : 지역·기간·인원·스타일·자유서술 → 자연어 합성 → (자동) 후보 생성·전체선택 → 실제 관광지 추천
+//   select : 추천 관광지(실데이터) 다중선택 → 여행 만들기
+//            (선택 관광지 + 일자별 식당 3끼 조립 → /api/trips 저장 → /trips/{tripId} 이동)
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { Sparkles } from '@lucide/vue'
+import { Sparkles, Check } from '@lucide/vue'
 import { toast } from 'vue-sonner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Select } from '@/components/ui/select'
 import { getGuguns, getSidos } from '@/services/attractions'
-import { autoGeneratePlan } from '@/services/trips'
+import {
+  buildTripMessage,
+  createTripCandidates,
+  recommendTrip,
+  recommendRestaurants,
+  buildItinerary,
+  createTripFromItinerary,
+  RESTAURANT_CONTENT_TYPE_ID,
+} from '@/services/aiTrip'
 import { getGroups } from '@/services/groups'
 import StyleChipGroup from '@/features/plan/StyleChipGroup.vue'
 import FormSummaryBar from '@/features/plan/FormSummaryBar.vue'
@@ -53,9 +63,31 @@ const NOTE_MAX = 500
 const note = ref('')
 
 const generating = ref(false)
+// 진행 오버레이 문구 — 단계마다 다르게.
+const loadingText = ref('일정을 짜고 있어요…')
 // 후보 0건(empty) · 권한 403 · 모임 없음 → 화면에 머물며 EmptyState/안내 표시.
 const emptyResult = ref(false)
 const forbidden = ref(false)
+
+// ── 2단계 상태 (form → select) ───────────────────────────────
+const step = ref('form')
+const sessionId = ref(null)
+// 추천을 끌어내려고 후보를 전부 자동선택한다(사용자에겐 후보 단계를 노출하지 않음).
+const allCandidateIds = ref([])
+const aiReply = ref('')
+// 선택 가능한 실제 관광지 추천(식당 제외).
+const recommendations = ref([])
+// 사용자가 고른 추천 contentId 집합.
+const selectedRecIds = ref([])
+
+const canCreate = computed(() => selectedRecIds.value.length >= 1 && !generating.value)
+// 여행 제목 기본값(지역+기간). 없으면 일반 기본값.
+const defaultTitle = computed(() => {
+  if (regionLabel.value && nightCount.value > 0) {
+    return `${regionLabel.value} ${nightCount.value}박 ${dayCount.value}일`
+  }
+  return regionLabel.value || 'AI 추천 여행 계획'
+})
 
 // 라우트 쿼리로 모임 진입했는지.
 const enteredAsGroup = computed(() => route.query.groupId != null)
@@ -147,44 +179,116 @@ const canGenerate = computed(
     !generating.value,
 )
 
-// ── 자동 생성 ────────────────────────────────────────────────
+// ── ① 폼 → (자동) 후보 생성·전체선택 → 실제 관광지 추천 → 선택 단계 ──
 async function generate() {
   if (!canGenerate.value) return
   generating.value = true
+  loadingText.value = '실제 관광지를 찾고 있어요…'
   emptyResult.value = false
   forbidden.value = false
   try {
-    const { tripId, partial, empty } = await autoGeneratePlan({
-      sidoCode: sidoCode.value,
-      gugunCode: gugunCode.value,
-      startDate: startDate.value,
-      endDate: endDate.value,
+    const message = buildTripMessage({
+      regionLabel: regionLabel.value,
+      nights: nightCount.value,
+      days: dayCount.value,
       headcount: headcount.value,
       styles: styles.value,
-      groupId: groupId.value,
-      // 자유 서술 — 비어 있으면 보내지 않는다. 실서버(/api/plans/auto)에서 AI 프롬프트로 활용.
-      note: note.value.trim() || undefined,
+      note: note.value,
     })
-    // 후보 0건 → 이동하지 않고 화면 잔류(입력 보존) + EmptyState.
-    if (empty || tripId == null) {
+    const cand = await createTripCandidates({ message, count: 8 })
+    if (!cand?.candidates?.length) {
       emptyResult.value = true
-      generating.value = false
+      return
+    }
+    sessionId.value = cand.sessionId
+    aiReply.value = cand.reply ?? ''
+    // 후보를 전부 자동선택해 추천 풀을 넓게 가져온다.
+    allCandidateIds.value = cand.candidates.map((c) => c.candidateId)
+
+    const rec = await recommendTrip({
+      sessionId: sessionId.value,
+      selectedCandidateIds: allCandidateIds.value,
+      limit: 20,
+    })
+    // 식당(음식점)은 일정 생성 시 자동 추가하므로 선택 목록에선 제외(볼거리만 고르게).
+    const places = (rec?.recommendations ?? []).filter(
+      (r) => r.contentTypeId !== RESTAURANT_CONTENT_TYPE_ID,
+    )
+    if (places.length === 0) {
+      emptyResult.value = true
+      return
+    }
+    recommendations.value = places
+    selectedRecIds.value = []
+    step.value = 'select'
+  } catch {
+    toast.error('추천을 불러오다가 문제가 생겼어요. 잠시 후 다시 시도해 주세요.')
+  } finally {
+    generating.value = false
+  }
+}
+
+// 추천 카드 다중 선택 토글(contentId 기준).
+function toggleRec(contentId) {
+  const i = selectedRecIds.value.indexOf(contentId)
+  if (i === -1) selectedRecIds.value.push(contentId)
+  else selectedRecIds.value.splice(i, 1)
+}
+
+// ── ② 선택 추천 + 식당 → 일정 조립 → 여행 생성 ───────────────
+async function createPlan() {
+  if (!canCreate.value) return
+  generating.value = true
+  loadingText.value = '식당까지 더해 일정을 짜고 있어요…'
+  forbidden.value = false
+  try {
+    const attractions = recommendations.value.filter((r) =>
+      selectedRecIds.value.includes(r.contentId),
+    )
+    // 일수×3 끼니만큼 식당을 추천받아 자동 배치.
+    const restaurants = await recommendRestaurants({
+      sessionId: sessionId.value,
+      selectedCandidateIds: allCandidateIds.value,
+      days: dayCount.value,
+    })
+    const items = buildItinerary({
+      attractions,
+      restaurants,
+      startDate: startDate.value,
+      endDate: endDate.value,
+    })
+    const trip = await createTripFromItinerary({
+      title: defaultTitle.value,
+      startDate: startDate.value,
+      endDate: endDate.value,
+      groupId: groupId.value,
+      items,
+      region: regionLabel.value || undefined, // 패널 '지역'에 반영(문자열 라벨)
+      styles: styles.value, // 패널 '스타일'에 반영
+    })
+    const tripId = trip?.tripId
+    if (tripId == null) {
+      toast.error('여행을 만들지 못했어요. 잠시 후 다시 시도해 주세요.')
       return
     }
     await router.push(`/trips/${tripId}`)
-    if (partial) {
-      toast('후보가 적어 일부만 채웠어요')
-    }
   } catch (err) {
-    generating.value = false
     // 비멤버 groupId → 개인 여행 전환 안내(입력 보존).
     if (err?.status === 403) {
       forbidden.value = true
       toast.error('이 여행은 모임 멤버만 만들 수 있어요')
       return
     }
-    toast.error('일정을 짜다가 문제가 생겼어요. 잠시 후 다시 시도해 주세요.')
+    toast.error('여행을 만들다가 문제가 생겼어요. 잠시 후 다시 시도해 주세요.')
+  } finally {
+    generating.value = false
   }
+}
+
+// 폼으로 돌아가기.
+function backToForm() {
+  step.value = 'form'
+  emptyResult.value = false
 }
 
 // 403 안내에서 개인 여행으로 전환(groupId 비우기).
@@ -217,9 +321,10 @@ function cancel() {
       <Button type="button" @click="router.push('/groups')">모임 만들러 가기</Button>
     </EmptyState>
 
-    <!-- 폼 캔버스 -->
     <template v-else>
+    <!-- STEP 1: 폼 캔버스 -->
     <div
+      v-if="step === 'form'"
       class="relative rounded-[var(--radius-win)] border border-[var(--border)] bg-[var(--card)] p-5 shadow-[var(--shadow-win)] sm:p-7"
     >
       <div class="grid grid-cols-1 gap-x-8 gap-y-6 md:grid-cols-2">
@@ -318,6 +423,61 @@ function cancel() {
       </div>
     </div>
 
+    <!-- STEP 2: 실제 추천 관광지 다중선택 → 바로 여행 만들기 -->
+    <div v-else-if="step === 'select'" class="flex flex-col gap-4">
+      <div
+        class="rounded-[var(--radius-win)] border border-[var(--border)] bg-[var(--card)] p-5 shadow-[var(--shadow-win)] sm:p-7"
+      >
+        <h2 class="text-sm font-semibold text-[var(--ink)]">어디를 둘러볼까요?</h2>
+        <p class="mt-1 text-sm text-[var(--ink-2)]">
+          {{ aiReply || '취향에 맞는 실제 관광지를 골라봤어요.' }} 고른 곳에 더해, 점심·저녁
+          식당과 기본 시간대까지 일정에 자동으로 넣어드려요.
+        </p>
+
+        <ul class="mt-4 grid grid-cols-1 gap-2.5 sm:grid-cols-2">
+          <li v-for="r in recommendations" :key="r.contentId">
+            <button
+              type="button"
+              class="flex w-full flex-col gap-1 rounded-[var(--radius-win)] border p-3.5 text-left transition-colors"
+              :class="
+                selectedRecIds.includes(r.contentId)
+                  ? 'border-[var(--brand)] bg-[var(--brand)]/5'
+                  : 'border-[var(--border)] hover:border-[var(--ink-3)]'
+              "
+              :aria-pressed="selectedRecIds.includes(r.contentId)"
+              @click="toggleRec(r.contentId)"
+            >
+              <span class="flex items-center justify-between gap-2">
+                <span class="truncate font-semibold text-[var(--ink)]">{{ r.title }}</span>
+                <Check
+                  v-if="selectedRecIds.includes(r.contentId)"
+                  class="size-4 shrink-0 text-[var(--brand)]"
+                />
+              </span>
+              <span v-if="r.sidoName" class="text-xs text-[var(--ink-3)]"
+                >{{ r.sidoName }} {{ r.gugunName }}</span
+              >
+              <span
+                v-if="r.similarity != null"
+                class="mt-0.5 text-xs text-[var(--brand)]"
+                >매칭 {{ Math.round(r.similarity * 100) }}%</span
+              >
+            </button>
+          </li>
+        </ul>
+      </div>
+
+      <div class="flex items-center justify-between gap-2">
+        <Button type="button" variant="ghost" @click="backToForm">← 조건 다시 고르기</Button>
+        <Button type="button" :disabled="!canCreate" @click="createPlan">
+          <Sparkles class="size-4" />
+          {{
+            selectedRecIds.length > 0 ? `${selectedRecIds.length}곳으로 여행 만들기` : '여행 만들기'
+          }}
+        </Button>
+      </div>
+    </div>
+
     <!-- 권한 403: 비멤버 groupId 안내 + 개인 여행 전환 -->
     <div
       v-if="forbidden"
@@ -340,8 +500,9 @@ function cancel() {
       class="mt-4"
     />
 
-    <!-- 액션바 (데스크탑: 캔버스 아래 / 모바일: 하단 고정 풀폭) -->
+    <!-- 액션바 (STEP1 폼 전용 / 데스크탑: 캔버스 아래 · 모바일: 하단 고정 풀폭) -->
     <div
+      v-if="step === 'form'"
       class="fixed inset-x-0 bottom-0 z-20 flex flex-col gap-3 border-t border-[var(--border)] bg-[var(--card)] p-4 sm:static sm:mt-5 sm:flex-row sm:items-center sm:justify-between sm:rounded-[var(--radius-win)] sm:border sm:p-4 sm:shadow-[var(--shadow-win)]"
     >
       <FormSummaryBar
@@ -371,7 +532,7 @@ function cancel() {
         <div
           class="size-10 animate-spin rounded-full border-2 border-[var(--border)] border-t-[var(--brand)]"
         />
-        <p class="text-base font-medium text-[var(--ink)]">일정을 짜고 있어요…</p>
+        <p class="text-base font-medium text-[var(--ink)]">{{ loadingText }}</p>
         <p class="text-sm text-[var(--ink-3)]">잠깐이면 돼요. 곧 보여 드릴게요.</p>
       </div>
     </div>

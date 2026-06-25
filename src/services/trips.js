@@ -83,12 +83,16 @@ export async function deleteTrip(tripId) {
   return apiDelete(`/api/trips/${tripId}`)
 }
 
-// ── 수동 생성 (D1, 빈 문서) ──────────────────────────────────
-// body: { title, startDate, endDate, groupId? }
+// ── 생성 (D1 빈 문서 / AI 조립 일정) ─────────────────────────
+// body: { title, startDate, endDate, groupId?, data? }
+// data 를 주면 그 items 를 그대로 담는다(AI 추천 일정 조립). 없으면 빈 문서.
 export async function createTrip(body) {
   if (USE_MOCK) {
     await mockDelay()
     const tripId = ++mockTripSeq
+    const data =
+      body.data && typeof body.data === 'object' ? body.data : { items: [] }
+    if (!Array.isArray(data.items)) data.items = []
     db.TRIPS[tripId] = {
       trip_id: tripId,
       title: body.title ?? '새 여행',
@@ -97,76 +101,21 @@ export async function createTrip(body) {
       start_date: body.startDate ?? null,
       end_date: body.endDate ?? null,
       cover: null,
-      icon: '🗺️',
-      region: null,
-      budgetLabel: '',
-      styles: [],
+      icon: data.meta?.icon ?? '🗺️',
+      region: data.meta?.region ?? null,
+      budgetLabel: data.meta?.budgetLabel ?? '',
+      styles: data.meta?.styles ?? [],
       members: [{ id: 'u1', name: '태호', initial: '태', color: 'var(--collab-1)' }],
       presence: [],
-      data: { items: [] },
+      data,
     }
     return { tripId }
   }
   return apiPost('/api/trips', body)
 }
 
-// ── 자동 생성 (S5, D2) ───────────────────────────────────────
-// body: { sidoCode, gugunCode?, startDate, endDate, headcount, styles[], groupId? }
-// 반환: { tripId, partial, empty } — 후보 0건이면 trip 을 만들지 않고 { tripId:null, empty:true }.
-export async function autoGeneratePlan(body) {
-  if (USE_MOCK) {
-    await mockDelay(1600) // "일정을 짜고 있어요…" 체감용
-    const sido = db.SIDOS.find((s) => s.sidoCode === Number(body.sidoCode))
-    const pool = db.ATTRACTIONS.filter((a) => a.sidoCode === Number(body.sidoCode))
-    // 후보 0건 → 생성하지 않고 화면 잔류 신호(S5 EmptyState).
-    if (pool.length === 0) {
-      return { tripId: null, partial: true, empty: true }
-    }
-    const days = dayList(body.startDate, body.endDate)
-    const items = []
-    let idSeq = 0
-    days.forEach((date) => {
-      const slots = ['10:00', '13:00', '16:00']
-      slots.forEach((time, i) => {
-        const place = pool[(idSeq + i) % Math.max(pool.length, 1)]
-        if (!place) return
-        items.push({
-          id: `g-${++idSeq}`,
-          content_id: place.contentId,
-          title: place.title,
-          type: place.contentTypeId === 39 ? '식당' : '관광',
-          lat: place.mapY,
-          lng: place.mapX,
-          visitDate: date,
-          time,
-          durationMin: 90,
-          order: i + 1,
-          media: [],
-          properties: { region: `${place.sidoName} ${place.gugunName}` },
-        })
-      })
-    })
-    const tripId = ++mockTripSeq
-    db.TRIPS[tripId] = {
-      trip_id: tripId,
-      title: `${sido?.sidoName ?? ''} ${days.length - 1}박 ${days.length}일`,
-      group_id: body.groupId ?? null,
-      user_id: db.CURRENT_USER.id,
-      start_date: body.startDate,
-      end_date: body.endDate,
-      cover: null,
-      icon: '✨',
-      region: { label: sido?.sidoName ?? '', sido_code: Number(body.sidoCode) },
-      budgetLabel: '',
-      styles: body.styles ?? [],
-      members: [{ id: 'u1', name: '태호', initial: '태', color: 'var(--collab-1)' }],
-      presence: [],
-      data: { items },
-    }
-    return { tripId, partial: pool.length < 3 }
-  }
-  return apiPost('/api/plans/auto', body)
-}
+// ── 자동 생성 (S5) ───────────────────────────────────────────
+// AI 후보 선택 기반 흐름으로 이관됨 → services/aiTrip.js (POST /api/ai/trip-*).
 
 function mediaTypeOf(file) {
   const contentType = file?.type ?? ''
@@ -176,8 +125,8 @@ function mediaTypeOf(file) {
 }
 
 // ── 미디어 업로드 (E1, S6) ───────────────────────────────────
-// POST /api/trips/{tripId}/items/{itemId}/media
-// multipart/form-data: file, mediaType
+// 미디어 업로드 — 백엔드: POST /api/trips/{tripId}/items/{itemId}/media (multipart: file, mediaType)
+// itemId = 블록 id (trips.data.items[].id). 형식·용량 검증은 호출부(onUploadMedia)에서 선반영.
 export async function uploadMedia(tripId, itemIdOrFormData, fileArg) {
   if (USE_MOCK) {
     await mockDelay(800)
@@ -193,26 +142,12 @@ export async function uploadMedia(tripId, itemIdOrFormData, fileArg) {
       },
     }
   }
-
   const itemId = itemIdOrFormData
   const formData = new FormData()
   formData.append('file', fileArg)
   formData.append('mediaType', mediaTypeOf(fileArg))
 
   return apiUpload(`/api/trips/${tripId}/items/${encodeURIComponent(itemId)}/media`, formData)
-}
-
-// startDate~endDate(포함) 사이의 "YYYY-MM-DD" 배열.
-function dayList(startDate, endDate) {
-  const out = []
-  if (!startDate || !endDate) return [startDate].filter(Boolean)
-  const cur = new Date(startDate)
-  const end = new Date(endDate)
-  while (cur <= end) {
-    out.push(cur.toISOString().slice(0, 10))
-    cur.setDate(cur.getDate() + 1)
-  }
-  return out
 }
 
 // S7 마이페이지가 mypage.js 를 쓰므로 여기선 trip 카드 조회 제외.

@@ -37,6 +37,8 @@ const emit = defineEmits([
   'drop-on-day',
   'reorder-drop',
   'upload-media',
+  'delete-media',
+  'set-representative',
 ])
 
 const open = ref(true)
@@ -124,8 +126,10 @@ const grouped = computed(() => {
             @open-menu="(blk) => emit('open-menu', blk)"
             @dragstart="(id) => emit('block-dragstart', id)"
             @dragend="emit('block-dragend')"
-            @reorder-drop="(id) => emit('reorder-drop', id)"
+            @reorder-drop="(id, pos) => emit('reorder-drop', id, pos)"
             @upload-media="(id, files) => emit('upload-media', id, files)"
+            @delete-media="(id, idx) => emit('delete-media', id, idx)"
+            @set-representative="(id, idx) => emit('set-representative', id, idx)"
           />
         </template>
       </template>
@@ -145,7 +149,7 @@ const grouped = computed(() => {
           @open-menu="(blk) => emit('open-menu', blk)"
           @dragstart="(id) => emit('block-dragstart', id)"
           @dragend="emit('block-dragend')"
-          @reorder-drop="(id) => emit('reorder-drop', id)"
+          @reorder-drop="(id, pos) => emit('reorder-drop', id, pos)"
           @upload-media="(id, files) => emit('upload-media', id, files)"
         />
       </template>

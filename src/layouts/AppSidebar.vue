@@ -17,6 +17,7 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { getGroups } from '@/services/groups'
 import { getMyTrips } from '@/services/mypage'
+import { displayTripTitle } from '@/stores/tripUiState'
 
 const route = useRoute()
 
@@ -142,7 +143,7 @@ function isActiveTrip(tripId) {
       :as="RouterLink"
       :to="`/trips/${trip.tripId}`"
       emoji="🧳"
-      :label="trip.title"
+      :label="displayTripTitle(trip.tripId, trip.title)"
       page
       :active="isActiveTrip(trip.tripId)"
     />
@@ -160,7 +161,7 @@ function isActiveTrip(tripId) {
       :as="RouterLink"
       :to="`/trips/${trip.tripId}`"
       emoji="🤝"
-      :label="trip.title"
+      :label="displayTripTitle(trip.tripId, trip.title)"
       page
       :active="isActiveTrip(trip.tripId)"
     />
