@@ -9,7 +9,6 @@ import { useRoute } from 'vue-router'
 import { toast } from 'vue-sonner'
 import { getGroupMap } from '@/services/groupMap'
 import { getGroup } from '@/services/groups'
-import { getGuguns, getSidos } from '@/services/attractions'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Button } from '@/components/ui/button'
 import { Select } from '@/components/ui/select'
@@ -26,10 +25,7 @@ const groupId = computed(() => route.params.id)
 
 const items = ref([])
 const group = ref(null)
-const sidos = ref([])
-const guguns = ref([])
-const selectedSido = ref(null)
-const selectedGugun = ref(null)
+const regionLevel = ref('SIDO') // SIDO | GUGUN
 const selectedMediaType = ref(null)
 const status = ref('loading') // loading | ready | empty | error
 const focusedSido = ref(null)
@@ -38,8 +34,6 @@ async function load() {
   status.value = 'loading'
   try {
     const params = {
-      ...(selectedSido.value != null ? { sidoCode: selectedSido.value } : {}),
-      ...(selectedGugun.value != null ? { gugunCode: selectedGugun.value } : {}),
       ...(selectedMediaType.value ? { mediaType: selectedMediaType.value } : {}),
     }
     const data = await getGroupMap(groupId.value, params)
@@ -55,25 +49,7 @@ watch(groupId, load, { immediate: true })
 watch(groupId, async (id) => {
   group.value = await getGroup(id).catch(() => null)
 }, { immediate: true })
-watch(groupId, async () => {
-  sidos.value = (await getSidos().catch(() => [])).map((s) => ({
-    value: s.sidoCode,
-    label: s.sidoName,
-  }))
-}, { immediate: true })
-watch(selectedSido, async (sidoCode) => {
-  selectedGugun.value = null
-  focusedSido.value = sidoCode == null ? null : Number(sidoCode)
-  if (sidoCode == null) {
-    guguns.value = []
-    return
-  }
-  guguns.value = (await getGuguns(sidoCode).catch(() => [])).map((g) => ({
-    value: g.gugunCode,
-    label: g.gugunName,
-  }))
-})
-watch([selectedSido, selectedGugun, selectedMediaType], load)
+watch(selectedMediaType, load)
 
 const mediaTypeOptions = [
   { value: 'PHOTO', label: '사진' },
@@ -81,12 +57,44 @@ const mediaTypeOptions = [
   { value: 'VIDEO', label: '영상' },
 ]
 
+const regionLevelOptions = [
+  { value: 'SIDO', label: '도/시' },
+  { value: 'GUGUN', label: '구군' },
+]
+
+const SIDO_DISPLAY_NAMES = {
+  1: '서울시',
+  2: '인천시',
+  3: '대전시',
+  4: '대구시',
+  5: '광주시',
+  6: '부산시',
+  7: '울산시',
+  8: '세종시',
+  31: '경기도',
+  32: '강원도',
+  33: '충청북도',
+  34: '충청남도',
+  35: '경상북도',
+  36: '경상남도',
+  37: '전라북도',
+  38: '전라남도',
+  39: '제주도',
+}
+
 const regionStats = computed(() => {
   const map = new Map()
   for (const item of items.value) {
-    const key = `${item.sidoCode}-${item.gugunCode ?? 'all'}`
+    const key =
+      regionLevel.value === 'GUGUN'
+        ? `${item.sidoCode}-${item.gugunCode ?? 'unknown'}`
+        : `${item.sidoCode}`
     const prev = map.get(key) ?? {
       ...item,
+      id: `${regionLevel.value}-${key}`,
+      groupLevel: regionLevel.value,
+      gugunCode: regionLevel.value === 'GUGUN' ? item.gugunCode : null,
+      regionLabel: regionLabelOf(item),
       count: 0,
       photo: null,
       types: new Set(),
@@ -99,19 +107,31 @@ const regionStats = computed(() => {
   return [...map.values()].map((v) => ({ ...v, types: [...v.types] }))
 })
 
-const visitedSidoCount = computed(() => new Set(items.value.map((item) => item.sidoCode)).size)
 const totalMediaCount = computed(() => items.value.length)
 const title = computed(() => group.value?.groupName ? `${group.value.groupName} 발자취` : '모임 발자취')
-const hasFilter = computed(() => selectedSido.value != null || selectedGugun.value != null || !!selectedMediaType.value)
+const hasFilter = computed(() => !!selectedMediaType.value)
 const emptyTitle = computed(() => hasFilter.value ? '이 조건에 맞는 발자취가 없어요' : '아직 함께 다녀온 곳이 없어요')
 const emptyDescription = computed(() =>
   hasFilter.value ? '필터를 바꾸거나 여행 기록에 미디어를 더해보세요.' : '여행을 다녀오면 여기에 발자취가 쌓여요.',
 )
+const regionUnitLabel = computed(() => (regionLevel.value === 'GUGUN' ? '구군' : '도/시'))
+const groupedRegionCount = computed(() => regionStats.value.length)
+
+function regionLabelOf(item) {
+  if (regionLevel.value === 'GUGUN') {
+    return item.gugunName || item.regionLabel || '지역 미상'
+  }
+
+  return SIDO_DISPLAY_NAMES[item.sidoCode] || item.sidoName || SIDO_CELLS.find((c) => c.sidoCode === item.sidoCode)?.name || '지역 미상'
+}
 
 function resetFilters() {
-  selectedSido.value = null
-  selectedGugun.value = null
   selectedMediaType.value = null
+  focusedSido.value = null
+}
+
+function selectRegionLevel(level) {
+  regionLevel.value = level
   focusedSido.value = null
 }
 
@@ -126,7 +146,9 @@ const gallery = ref({ open: false, loading: false, label: '', sidoCode: null, gu
 const galleryRepresentativeId = computed(() => {
   // 현재 대표(items)에서 갤러리 지역과 일치하는 한 건.
   const rep = items.value.find(
-    (m) => m.sidoCode === gallery.value.sidoCode && (m.gugunCode ?? null) === (gallery.value.gugunCode ?? null),
+    (m) =>
+      m.sidoCode === gallery.value.sidoCode &&
+      (gallery.value.gugunCode == null || (m.gugunCode ?? null) === gallery.value.gugunCode),
   )
   return rep?.id ?? null
 })
@@ -135,7 +157,11 @@ async function openGallery({ sidoCode, gugunCode = null, regionLabel = '' }) {
   focusedSido.value = sidoCode
   gallery.value = { open: true, loading: true, label: regionLabel, sidoCode, gugunCode, items: [] }
   try {
-    const data = await getGroupMap(groupId.value, { sidoCode, ...(gugunCode != null ? { gugunCode } : {}) })
+    const data = await getGroupMap(groupId.value, {
+      sidoCode,
+      ...(gugunCode != null ? { gugunCode } : {}),
+      ...(selectedMediaType.value ? { mediaType: selectedMediaType.value } : {}),
+    })
     gallery.value.items = Array.isArray(data) ? data : []
   } catch {
     toast.error('이 지역의 추억을 불러오지 못했어요.')
@@ -146,17 +172,25 @@ async function openGallery({ sidoCode, gugunCode = null, regionLabel = '' }) {
 
 function openGalleryBySido(sidoCode) {
   const cell = SIDO_CELLS.find((c) => c.sidoCode === sidoCode)
-  selectedSido.value = sidoCode
   openGallery({ sidoCode, regionLabel: cell?.name || '' })
 }
 
 function openGalleryFromPin(item) {
-  openGallery({ sidoCode: item.sidoCode, gugunCode: item.gugunCode ?? null, regionLabel: item.regionLabel })
+  openGallery(galleryPayloadFor(item))
 }
 
 function openGalleryFromCard(item) {
   focusRegion(item)
-  openGallery({ sidoCode: item.sidoCode, gugunCode: item.gugunCode ?? null, regionLabel: item.regionLabel })
+  openGallery(galleryPayloadFor(item))
+}
+
+function galleryPayloadFor(item) {
+  const useGugun = regionLevel.value === 'GUGUN'
+  return {
+    sidoCode: item.sidoCode,
+    gugunCode: useGugun ? item.gugunCode ?? null : null,
+    regionLabel: item.regionLabel,
+  }
 }
 
 </script>
@@ -170,17 +204,29 @@ function openGalleryFromCard(item) {
           <div>
             <h1 class="text-[20px] font-extrabold tracking-tight text-[var(--ink)]">{{ title }}</h1>
             <p class="mt-1 text-[12.5px] text-[var(--ink-3)]">
-              다녀온 지역은 미디어로 채워지고, 아직 안 간 곳은 지도 그대로 남아요.
+              다녀온 기록을 도/시 또는 구군 단위로 묶어 미디어를 보여줘요.
             </p>
           </div>
-          <div class="grid grid-cols-2 gap-2 sm:grid-cols-[150px_150px_130px_auto]">
-            <Select v-model="selectedSido" :options="sidos" placeholder="시도 전체" />
-            <Select
-              v-model="selectedGugun"
-              :options="guguns"
-              placeholder="구군 전체"
-              :disabled="!selectedSido || !guguns.length"
-            />
+          <div class="grid grid-cols-2 gap-2 sm:grid-cols-[auto_130px_auto]">
+            <div
+              class="flex h-9 overflow-hidden rounded-[var(--radius)] border border-[var(--border)] bg-[var(--bg-subtle)] p-0.5"
+              aria-label="지역 묶음 단위"
+            >
+              <button
+                v-for="option in regionLevelOptions"
+                :key="option.value"
+                type="button"
+                class="min-w-16 rounded-[var(--radius-sm)] px-3 text-[13px] font-semibold transition-colors"
+                :class="
+                  regionLevel === option.value
+                    ? 'bg-[var(--card)] text-[var(--brand-ink)] shadow-[var(--shadow-soft)]'
+                    : 'text-[var(--ink-3)] hover:text-[var(--ink)]'
+                "
+                @click="selectRegionLevel(option.value)"
+              >
+                {{ option.label }}
+              </button>
+            </div>
             <Select v-model="selectedMediaType" :options="mediaTypeOptions" placeholder="미디어 전체" />
             <Button variant="outline" size="sm" class="h-9" @click="resetFilters">초기화</Button>
           </div>
@@ -233,8 +279,8 @@ function openGalleryFromCard(item) {
 
       <div class="my-4 grid grid-cols-2 gap-2">
         <div class="rounded-[var(--radius)] border border-[var(--border)] bg-[var(--bg-subtle)] p-3">
-          <div class="text-[11px] font-bold text-[var(--ink-3)]">방문 시도</div>
-          <div class="mt-1 text-[22px] font-extrabold text-[var(--brand-ink)]">{{ visitedSidoCount }}</div>
+          <div class="text-[11px] font-bold text-[var(--ink-3)]">{{ regionUnitLabel }} 묶음</div>
+          <div class="mt-1 text-[22px] font-extrabold text-[var(--brand-ink)]">{{ groupedRegionCount }}</div>
         </div>
         <div class="rounded-[var(--radius)] border border-[var(--border)] bg-[var(--bg-subtle)] p-3">
           <div class="text-[11px] font-bold text-[var(--ink-3)]">기록 미디어</div>
@@ -256,7 +302,7 @@ function openGalleryFromCard(item) {
       <div v-else-if="status === 'ready'" class="flex flex-col gap-2">
         <MemoryCard
           v-for="m in regionStats"
-          :key="m.id"
+          :key="`${m.groupLevel}-${m.id}`"
           :item="m"
           :active="focusedSido === m.sidoCode"
           @focus="openGalleryFromCard"
@@ -272,13 +318,13 @@ function openGalleryFromCard(item) {
     >
       <div class="mx-auto mb-2.5 h-1 w-9 rounded-full bg-[var(--border-strong)]" />
       <div class="mb-2 flex items-center justify-between gap-2 text-[13px] font-bold text-[var(--ink)]">
-        <span>발자취 {{ regionStats.length }}곳</span>
+        <span>{{ regionUnitLabel }} {{ regionStats.length }}곳</span>
         <Badge variant="secondary">{{ totalMediaCount }}개 기록</Badge>
       </div>
       <Carousel :arrows="false">
         <button
           v-for="m in regionStats"
-          :key="m.id"
+          :key="`mobile-${m.groupLevel}-${m.id}`"
           type="button"
           class="w-[130px] flex-none snap-start text-left"
           @click="openGalleryFromCard(m)"
