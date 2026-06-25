@@ -20,12 +20,14 @@ const isAudio = computed(() => props.media?.type === 'AUDIO')
 
 <template>
   <!-- Sheet/Dialog 오버레이(z-50, body 텔레포트) 위로 올리려 body로 텔레포트 + 더 높은 z-index. -->
+  <!-- 모달 Sheet가 body에 pointer-events:none를 걸므로 pointer-events-auto로 클릭(닫기)을 되살린다. -->
   <Teleport to="body">
   <div
     v-if="media"
-    class="fixed inset-0 z-[100] grid place-items-center bg-black/70 p-6"
+    class="pointer-events-auto fixed inset-0 z-[100] grid place-items-center bg-black/70 p-6"
     role="dialog"
     aria-label="사진 보기"
+    @pointerdown.stop
     @click="emit('close')"
   >
     <div
