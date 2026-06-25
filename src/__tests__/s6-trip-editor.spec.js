@@ -63,7 +63,7 @@ describe('S6 TripEditorView', () => {
     await flushPromises()
     expect(getTrip).toHaveBeenCalledWith('10')
     const text = wrapper.text()
-    expect(text).toContain('갤러리')
+    expect(text).toContain('미디어')
     expect(text).toContain('지도')
     expect(text).toContain('보드')
     // 제목 인풋 값

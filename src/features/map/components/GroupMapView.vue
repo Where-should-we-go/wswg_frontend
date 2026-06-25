@@ -7,9 +7,13 @@
 import { computed, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { toast } from 'vue-sonner'
-import { getGroupMap, curateRepresentative, removeRepresentative } from '@/services/groupMap'
+import { getGroupMap } from '@/services/groupMap'
+import { getGroup } from '@/services/groups'
+import { getGuguns, getSidos } from '@/services/attractions'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Button } from '@/components/ui/button'
+import { Select } from '@/components/ui/select'
+import { Badge } from '@/components/ui/badge'
 import EmptyState from '@/components/common/EmptyState.vue'
 import Carousel from '@/components/common/Carousel.vue'
 import { MEDIA_BADGE, SIDO_CELLS } from '@/features/map/data/koreaSido'
@@ -21,13 +25,24 @@ const route = useRoute()
 const groupId = computed(() => route.params.id)
 
 const items = ref([])
+const group = ref(null)
+const sidos = ref([])
+const guguns = ref([])
+const selectedSido = ref(null)
+const selectedGugun = ref(null)
+const selectedMediaType = ref(null)
 const status = ref('loading') // loading | ready | empty | error
 const focusedSido = ref(null)
 
 async function load() {
   status.value = 'loading'
   try {
-    const data = await getGroupMap(groupId.value)
+    const params = {
+      ...(selectedSido.value != null ? { sidoCode: selectedSido.value } : {}),
+      ...(selectedGugun.value != null ? { gugunCode: selectedGugun.value } : {}),
+      ...(selectedMediaType.value ? { mediaType: selectedMediaType.value } : {}),
+    }
+    const data = await getGroupMap(groupId.value, params)
     items.value = Array.isArray(data) ? data : []
     status.value = items.value.length ? 'ready' : 'empty'
   } catch {
@@ -37,6 +52,68 @@ async function load() {
 }
 
 watch(groupId, load, { immediate: true })
+watch(groupId, async (id) => {
+  group.value = await getGroup(id).catch(() => null)
+}, { immediate: true })
+watch(groupId, async () => {
+  sidos.value = (await getSidos().catch(() => [])).map((s) => ({
+    value: s.sidoCode,
+    label: s.sidoName,
+  }))
+}, { immediate: true })
+watch(selectedSido, async (sidoCode) => {
+  selectedGugun.value = null
+  focusedSido.value = sidoCode == null ? null : Number(sidoCode)
+  if (sidoCode == null) {
+    guguns.value = []
+    return
+  }
+  guguns.value = (await getGuguns(sidoCode).catch(() => [])).map((g) => ({
+    value: g.gugunCode,
+    label: g.gugunName,
+  }))
+})
+watch([selectedSido, selectedGugun, selectedMediaType], load)
+
+const mediaTypeOptions = [
+  { value: 'PHOTO', label: '사진' },
+  { value: 'AUDIO', label: '녹음' },
+  { value: 'VIDEO', label: '영상' },
+]
+
+const regionStats = computed(() => {
+  const map = new Map()
+  for (const item of items.value) {
+    const key = `${item.sidoCode}-${item.gugunCode ?? 'all'}`
+    const prev = map.get(key) ?? {
+      ...item,
+      count: 0,
+      photo: null,
+      types: new Set(),
+    }
+    prev.count += 1
+    prev.types.add(item.mediaType)
+    if (!prev.photo && item.mediaType === 'PHOTO' && item.mediaUrl) prev.photo = item.mediaUrl
+    map.set(key, prev)
+  }
+  return [...map.values()].map((v) => ({ ...v, types: [...v.types] }))
+})
+
+const visitedSidoCount = computed(() => new Set(items.value.map((item) => item.sidoCode)).size)
+const totalMediaCount = computed(() => items.value.length)
+const title = computed(() => group.value?.groupName ? `${group.value.groupName} 발자취` : '모임 발자취')
+const hasFilter = computed(() => selectedSido.value != null || selectedGugun.value != null || !!selectedMediaType.value)
+const emptyTitle = computed(() => hasFilter.value ? '이 조건에 맞는 발자취가 없어요' : '아직 함께 다녀온 곳이 없어요')
+const emptyDescription = computed(() =>
+  hasFilter.value ? '필터를 바꾸거나 여행 기록에 미디어를 더해보세요.' : '여행을 다녀오면 여기에 발자취가 쌓여요.',
+)
+
+function resetFilters() {
+  selectedSido.value = null
+  selectedGugun.value = null
+  selectedMediaType.value = null
+  focusedSido.value = null
+}
 
 // 지도/카드 클릭 → 해당 시도로 포커스.
 function focusRegion(item) {
@@ -69,6 +146,7 @@ async function openGallery({ sidoCode, gugunCode = null, regionLabel = '' }) {
 
 function openGalleryBySido(sidoCode) {
   const cell = SIDO_CELLS.find((c) => c.sidoCode === sidoCode)
+  selectedSido.value = sidoCode
   openGallery({ sidoCode, regionLabel: cell?.name || '' })
 }
 
@@ -81,38 +159,35 @@ function openGalleryFromCard(item) {
   openGallery({ sidoCode: item.sidoCode, gugunCode: item.gugunCode ?? null, regionLabel: item.regionLabel })
 }
 
-// ── 대표 지정/해제(E3) ─────────────────────────────────────
-async function curate(media) {
-  try {
-    await curateRepresentative(groupId.value, {
-      tripId: media.tripId,
-      sidoCode: media.sidoCode,
-      gugunCode: media.gugunCode,
-      mediaUrl: media.mediaUrl,
-      mediaType: media.mediaType,
-    })
-    toast.success('대표 추억으로 정했어요!')
-    await load()
-  } catch {
-    toast.error('대표 추억을 정하지 못했어요. 다시 시도해 주세요.')
-  }
-}
-
-async function removeRep(media) {
-  try {
-    await removeRepresentative(groupId.value, media.id)
-    toast.success('대표 추억을 해제했어요.')
-    await load()
-  } catch {
-    toast.error('대표 추억을 해제하지 못했어요. 다시 시도해 주세요.')
-  }
-}
 </script>
 
 <template>
-  <div class="flex h-full min-h-[420px] flex-col md:grid md:grid-cols-[1fr_340px]">
+  <div class="flex h-full min-h-[420px] flex-col md:grid md:grid-cols-[1fr_360px]">
     <!-- ─── 지도 존(주) ─── -->
-    <section class="relative min-h-[320px] flex-1 md:h-full">
+    <section class="relative flex min-h-[360px] flex-1 flex-col md:h-full">
+      <div class="border-b border-[var(--border)] bg-[var(--card)] px-4 py-3">
+        <div class="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+          <div>
+            <h1 class="text-[20px] font-extrabold tracking-tight text-[var(--ink)]">{{ title }}</h1>
+            <p class="mt-1 text-[12.5px] text-[var(--ink-3)]">
+              다녀온 지역은 미디어로 채워지고, 아직 안 간 곳은 지도 그대로 남아요.
+            </p>
+          </div>
+          <div class="grid grid-cols-2 gap-2 sm:grid-cols-[150px_150px_130px_auto]">
+            <Select v-model="selectedSido" :options="sidos" placeholder="시도 전체" />
+            <Select
+              v-model="selectedGugun"
+              :options="guguns"
+              placeholder="구군 전체"
+              :disabled="!selectedSido || !guguns.length"
+            />
+            <Select v-model="selectedMediaType" :options="mediaTypeOptions" placeholder="미디어 전체" />
+            <Button variant="outline" size="sm" class="h-9" @click="resetFilters">초기화</Button>
+          </div>
+        </div>
+      </div>
+
+      <div class="relative min-h-[320px] flex-1">
       <RegionMap
         :items="status === 'ready' ? items : []"
         :focused-sido="focusedSido"
@@ -127,8 +202,8 @@ async function removeRep(media) {
       >
         <EmptyState
           icon="🧭"
-          title="아직 함께 다녀온 곳이 없어요"
-          description="여행을 다녀오면 여기에 발자취가 쌓여요."
+          :title="emptyTitle"
+          :description="emptyDescription"
         />
       </div>
 
@@ -148,12 +223,24 @@ async function removeRep(media) {
       >
         <p class="text-sm text-[var(--ink-3)]">발자취를 불러오고 있어요…</p>
       </div>
+      </div>
     </section>
 
     <!-- ─── 우측 대표 패널 (데스크탑) ─── -->
     <aside class="hidden overflow-auto border-l border-[var(--border)] p-4 md:block">
       <h2 class="text-[15px] font-extrabold text-[var(--ink)]">우리가 함께 밟은 발자취</h2>
-      <p class="mt-1 mb-3.5 text-[12.5px] text-[var(--ink-3)]">지역마다 대표 추억 한 장이에요.</p>
+      <p class="mt-1 text-[12.5px] text-[var(--ink-3)]">지역별 여행 기록과 미디어를 모았어요.</p>
+
+      <div class="my-4 grid grid-cols-2 gap-2">
+        <div class="rounded-[var(--radius)] border border-[var(--border)] bg-[var(--bg-subtle)] p-3">
+          <div class="text-[11px] font-bold text-[var(--ink-3)]">방문 시도</div>
+          <div class="mt-1 text-[22px] font-extrabold text-[var(--brand-ink)]">{{ visitedSidoCount }}</div>
+        </div>
+        <div class="rounded-[var(--radius)] border border-[var(--border)] bg-[var(--bg-subtle)] p-3">
+          <div class="text-[11px] font-bold text-[var(--ink-3)]">기록 미디어</div>
+          <div class="mt-1 text-[22px] font-extrabold text-[var(--brand-ink)]">{{ totalMediaCount }}</div>
+        </div>
+      </div>
 
       <!-- 로딩 -->
       <div v-if="status === 'loading'" class="flex flex-col gap-2">
@@ -168,7 +255,7 @@ async function removeRep(media) {
       <!-- 기본 -->
       <div v-else-if="status === 'ready'" class="flex flex-col gap-2">
         <MemoryCard
-          v-for="m in items"
+          v-for="m in regionStats"
           :key="m.id"
           :item="m"
           :active="focusedSido === m.sidoCode"
@@ -184,18 +271,21 @@ async function removeRep(media) {
       class="border-t border-[var(--border)] bg-[var(--card)] px-4 pt-2.5 pb-3 md:hidden"
     >
       <div class="mx-auto mb-2.5 h-1 w-9 rounded-full bg-[var(--border-strong)]" />
-      <div class="mb-2 text-[13px] font-bold text-[var(--ink)]">대표 추억 {{ items.length }}</div>
+      <div class="mb-2 flex items-center justify-between gap-2 text-[13px] font-bold text-[var(--ink)]">
+        <span>발자취 {{ regionStats.length }}곳</span>
+        <Badge variant="secondary">{{ totalMediaCount }}개 기록</Badge>
+      </div>
       <Carousel :arrows="false">
         <button
-          v-for="m in items"
+          v-for="m in regionStats"
           :key="m.id"
           type="button"
           class="w-[130px] flex-none snap-start text-left"
           @click="openGalleryFromCard(m)"
         >
           <img
-            v-if="m.mediaUrl"
-            :src="m.mediaUrl"
+            v-if="m.photo || m.mediaUrl"
+            :src="m.photo || m.mediaUrl"
             alt=""
             class="h-[90px] w-full rounded-[var(--radius)] object-cover"
           />
@@ -208,7 +298,7 @@ async function removeRep(media) {
             {{ m.regionLabel }}
           </div>
           <div class="truncate text-[11px] text-[var(--ink-3)]">
-            {{ MEDIA_BADGE[m.mediaType]?.emoji }} {{ m.caption }}
+            {{ m.count }}개 기록 · {{ MEDIA_BADGE[m.mediaType]?.emoji }} {{ m.caption }}
           </div>
         </button>
       </Carousel>
@@ -221,8 +311,6 @@ async function removeRep(media) {
       :region-label="gallery.label"
       :items="gallery.items"
       :representative-id="galleryRepresentativeId"
-      @curate="curate"
-      @remove="removeRep"
     />
   </div>
 </template>

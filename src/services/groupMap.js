@@ -17,9 +17,39 @@ export async function getGroupMap(groupId, params = {}) {
         list = list.filter((m) => m.gugunCode === Number(params.gugunCode))
       }
     }
-    return list
+    if (params.mediaType != null) {
+      list = list.filter((m) => normalizeMediaType(m.mediaType) === normalizeMediaType(params.mediaType))
+    }
+    return list.map(normalizeGroupMedia)
   }
-  return apiGet(`/api/groups/${groupId}/map${toQuery(params)}`)
+  const rows = await apiGet(`/api/groups/${groupId}/media${toQuery(params)}`)
+  return (rows ?? []).map(normalizeGroupMedia)
+}
+
+function normalizeGroupMedia(row) {
+  const sidoName = row.sidoName ?? db.SIDOS.find((s) => s.sidoCode === Number(row.sidoCode))?.sidoName ?? ''
+  const gugunName =
+    row.gugunName ??
+    (db.GUGUNS[row.sidoCode] ?? []).find((g) => g.gugunCode === Number(row.gugunCode))?.gugunName ??
+    ''
+  const blockTitle = row.blockTitle ?? row.attractionTitle ?? row.caption ?? ''
+  const visitDate = row.visitDate ?? row.metadata?.visitDate ?? ''
+  return {
+    ...row,
+    id:
+      row.id ??
+      [row.tripId, row.blockId, row.mediaUrl, row.mediaType].filter((v) => v != null && v !== '').join(':'),
+    sidoCode: Number(row.sidoCode),
+    gugunCode: row.gugunCode == null ? null : Number(row.gugunCode),
+    mediaType: normalizeMediaType(row.mediaType),
+    regionLabel: [sidoName, gugunName].filter(Boolean).join(' ') || row.regionLabel || '지역 미상',
+    caption: row.caption ?? [blockTitle, visitDate].filter(Boolean).join(' · '),
+  }
+}
+
+function normalizeMediaType(mediaType) {
+  const normalized = String(mediaType ?? '').toUpperCase()
+  return normalized === 'VOICE' ? 'AUDIO' : normalized
 }
 
 // 대표 추억 큐레이션(E3). 지역당 1개 upsert.

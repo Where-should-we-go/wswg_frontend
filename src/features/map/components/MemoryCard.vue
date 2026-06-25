@@ -27,21 +27,23 @@ const emit = defineEmits(['focus', 'change'])
     @click="emit('focus', item)"
   >
     <img
-      v-if="item.mediaUrl"
-      :src="item.mediaUrl"
+      v-if="item.photo || (item.mediaType === 'PHOTO' && item.mediaUrl)"
+      :src="item.photo || item.mediaUrl"
       alt=""
       class="size-13 flex-none rounded-[var(--radius)] object-cover"
     />
     <div
       v-else
-      class="size-13 flex-none rounded-[var(--radius)] bg-[linear-gradient(135deg,var(--brand-soft),var(--bg-subtle))]"
+      class="grid size-13 flex-none place-items-center rounded-[var(--radius)] bg-[linear-gradient(135deg,var(--brand-soft),var(--bg-subtle))] text-[18px]"
       aria-hidden="true"
-    />
+    >
+      {{ MEDIA_BADGE[item.mediaType]?.emoji || '📍' }}
+    </div>
     <div class="min-w-0 flex-1">
       <div class="truncate text-[13.5px] font-bold text-[var(--ink)]">{{ item.regionLabel }}</div>
       <div class="mt-1 flex items-center gap-1.5 text-[11.5px] text-[var(--ink-3)]">
         <Badge variant="secondary" class="rounded-[var(--radius-sm)] px-1.5 py-0">
-          {{ MEDIA_BADGE[item.mediaType]?.emoji }} {{ MEDIA_BADGE[item.mediaType]?.label }}
+          {{ item.count ?? 1 }}개
         </Badge>
         <span class="truncate">{{ item.caption }}</span>
       </div>

@@ -57,6 +57,12 @@ const router = createRouter({
           meta: { requiresAuth: true },
         }, // S9
         {
+          path: 'groups/join',
+          name: 'group-join',
+          component: () => import('@/views/GroupJoinView.vue'),
+          meta: { requiresAuth: true },
+        },
+        {
           path: 'groups/:id/map',
           name: 'group-map',
           component: () => import('@/views/GroupMapView.vue'),
