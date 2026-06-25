@@ -222,8 +222,10 @@ onMounted(async () => {
   try {
     const [sidos, types] = await Promise.all([getSidos(), getContentTypes()])
     sidoOptions.value = sidos.map((s) => ({ value: s.sidoCode, label: s.sidoName }))
-    typeOptions.value = types.map((t) => ({ value: t.contentTypeId, label: t.name }))
-    typeNameById.value = Object.fromEntries(types.map((t) => [t.contentTypeId, t.name]))
+    typeOptions.value = types.map((t) => ({ value: t.contentTypeId, label: t.contentTypeName }))
+    typeNameById.value = Object.fromEntries(
+      types.map((t) => [t.contentTypeId, t.contentTypeName]),
+    )
     // 이미 로드된 행에 타입명 입혀요.
     rows.value = decorate(rows.value)
   } catch {

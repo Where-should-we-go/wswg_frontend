@@ -76,10 +76,11 @@ const selectedPlace = ref(null)
 const sidoOptions = computed(() => sidos.value.map((s) => ({ value: s.sidoCode, label: s.sidoName })))
 const gugunOptions = computed(() => guguns.value.map((g) => ({ value: g.gugunCode, label: g.gugunName })))
 const themeOptions = computed(() =>
-  contentTypes.value.map((c) => ({ value: c.contentTypeId, label: c.name })),
+  contentTypes.value.map((c) => ({ value: c.contentTypeId, label: c.contentTypeName })),
 )
 
-const typeNameOf = (id) => contentTypes.value.find((c) => c.contentTypeId === id)?.name ?? '관광지'
+const typeNameOf = (id) =>
+  contentTypes.value.find((c) => c.contentTypeId === id)?.contentTypeName ?? '관광지'
 
 // 시도 선택이 바뀌면 구군 목록을 새로 로드하고, 현재 선택 구군은 초기화.
 watch(
