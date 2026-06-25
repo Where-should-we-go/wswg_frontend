@@ -105,10 +105,10 @@ export function normalizeInviteLink(link) {
   }
 }
 
-// 공유용 공개 origin. VITE_PUBLIC_ORIGIN 이 있으면 그걸 쓰고(데모 시 외부 IP 고정),
-// 없으면 현재 접속한 주소(location.origin)로 폴백한다.
+// 공유용 공개 origin. 지금 접속한 주소(location.origin)를 그대로 쓴다.
+// → 데모/배포 어디서 열든 그 주소 기준으로 링크가 만들어진다(호스트 하드코딩 안 함).
 function publicOrigin() {
-  return import.meta.env.VITE_PUBLIC_ORIGIN || location.origin
+  return typeof location !== 'undefined' ? location.origin : ''
 }
 
 export function buildInviteLinkUrl(token) {

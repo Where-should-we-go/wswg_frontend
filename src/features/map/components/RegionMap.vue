@@ -95,13 +95,20 @@ const projection = computed(() => {
   }
 })
 
-const mediaByGugun = computed(() => {
+// 미디어를 좌표(lat/lng) 기준으로 시군구 GeoJSON 폴리곤에 떨어뜨려 묶는다.
+// 지역코드 체계(예: 제주 50 vs 지도 39)나 구군명 표기 차이와 무관하게 매칭된다.
+const mediaByFeature = computed(() => {
   const map = new Map()
   for (const item of props.items) {
-    const key = mediaKey(item.sidoCode, item.gugunName)
-    const list = map.get(key) ?? []
+    const lon = Number(item.longitude)
+    const lat = Number(item.latitude)
+    if (!Number.isFinite(lon) || !Number.isFinite(lat)) continue
+    const feature = rawFeatures.value.find((f) => featureContainsPoint(f, lon, lat))
+    if (!feature) continue
+    const code = String(feature.properties?.code ?? '')
+    const list = map.get(code) ?? []
     list.push(item)
-    map.set(key, list)
+    map.set(code, list)
   }
   return map
 })
@@ -169,8 +176,11 @@ function toCell(feature) {
     h: projectedBounds.maxY - projectedBounds.minY,
   }
   const center = polygonCenter(projected, bounds)
-  const media = mediaByGugun.value.get(mediaKey(sidoCode, name)) ?? []
-  const photo = media.find((item) => item.mediaType === 'PHOTO' && item.mediaUrl)
+  const media = mediaByFeature.value.get(code) ?? []
+  // 여행에서 대표로 선정한 사진(representative)을 우선, 없으면 첫 사진을 권역 대표로.
+  const photo =
+    media.find((item) => item.representative && item.mediaType === 'PHOTO' && item.mediaUrl) ??
+    media.find((item) => item.mediaType === 'PHOTO' && item.mediaUrl)
   const representative = photo ?? media[0] ?? null
 
   return {
@@ -243,12 +253,43 @@ function polygonCenter(points, bounds) {
   }
 }
 
-function mediaKey(sidoCode, gugunName) {
-  return `${Number(sidoCode)}:${normalizeRegionName(gugunName)}`
+// 점-다각형 포함 판정: [lon,lat]가 feature 폴리곤(외곽 링) 안이고 구멍(홀)에 없으면 true.
+function featureContainsPoint(feature, lon, lat) {
+  const geometry = feature.geometry
+  if (!geometry) return false
+  const polygons =
+    geometry.type === 'Polygon'
+      ? [geometry.coordinates]
+      : geometry.type === 'MultiPolygon'
+        ? geometry.coordinates
+        : []
+  for (const polygon of polygons) {
+    const outer = polygon[0]
+    if (!outer || !pointInRing(lon, lat, outer)) continue
+    let inHole = false
+    for (let h = 1; h < polygon.length; h++) {
+      if (pointInRing(lon, lat, polygon[h])) {
+        inHole = true
+        break
+      }
+    }
+    if (!inHole) return true
+  }
+  return false
 }
 
-function normalizeRegionName(name) {
-  return String(name ?? '').replace(/\s+/g, '').replace(/[·.]/g, '')
+function pointInRing(lon, lat, ring) {
+  let inside = false
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const xi = ring[i][0]
+    const yi = ring[i][1]
+    const xj = ring[j][0]
+    const yj = ring[j][1]
+    const intersect =
+      yi > lat !== yj > lat && lon < ((xj - xi) * (lat - yi)) / (yj - yi) + xi
+    if (intersect) inside = !inside
+  }
+  return inside
 }
 
 function clipId(cell) {

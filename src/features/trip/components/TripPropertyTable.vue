@@ -3,13 +3,17 @@
 // 노션 데이터베이스 프로퍼티 스타일: 날짜·지역·동행·스타일·예산.
 // 동행은 member pill(AvatarStack 와 같은 --collab-* 색), 지역/스타일은 BlockTag.
 import { computed } from "vue";
-import { Calendar, MapPin, Users, Palette, Wallet } from "@lucide/vue";
+import { Calendar, MapPin, Users, Palette, Wallet, X } from "@lucide/vue";
 import { BlockTag } from "@/components/ui/block-tag";
 import { formatBudget } from "@/features/trip/lib/blockMeta";
 
 const props = defineProps({
   trip: { type: Object, required: true },
+  // 편집 권한(여행 소유자). true 면 날짜 행을 date 입력으로 바꿔 직접 수정할 수 있다.
+  editable: { type: Boolean, default: false },
 });
+
+const emit = defineEmits(["set-dates", "remove-companion"]);
 
 function fmt(d) {
   if (!d) return "미정";
@@ -17,6 +21,13 @@ function fmt(d) {
   return `${dt.getFullYear()}. ${dt.getMonth() + 1}. ${dt.getDate()}`;
 }
 const dateRange = computed(() => `${fmt(props.trip.start_date)} → ${fmt(props.trip.end_date)}`);
+
+function onStartDate(e) {
+  emit("set-dates", { startDate: e.target.value || null, endDate: props.trip.end_date ?? null });
+}
+function onEndDate(e) {
+  emit("set-dates", { startDate: props.trip.start_date ?? null, endDate: e.target.value || null });
+}
 
 // 지역: { label } 객체 | 문자열 | null 모두 허용.
 const regionLabel = computed(() => {
@@ -60,7 +71,32 @@ function memberColor(m, i) {
     <div class="flex items-center gap-2 py-[5px] pr-2.5 text-[13.5px] text-[var(--ink-2)]">
       <Calendar class="size-4 text-[var(--ink-3)]" /> 날짜
     </div>
-    <div class="flex items-center rounded-sm px-2 py-[5px] text-[13.5px] hover:bg-[var(--accent)]">
+    <div
+      v-if="editable"
+      class="flex items-center gap-1.5 rounded-sm px-1 py-[3px] text-[13.5px]"
+    >
+      <input
+        type="date"
+        :value="trip.start_date ?? ''"
+        :max="trip.end_date || undefined"
+        aria-label="여행 시작일"
+        class="rounded-sm bg-transparent px-1.5 py-0.5 text-[13.5px] text-[var(--ink)] outline-none hover:bg-[var(--accent)] focus:bg-[var(--accent)] focus:ring-1 focus:ring-[var(--ring)]/40"
+        @change="onStartDate"
+      />
+      <span class="text-[var(--ink-3)]">→</span>
+      <input
+        type="date"
+        :value="trip.end_date ?? ''"
+        :min="trip.start_date || undefined"
+        aria-label="여행 종료일"
+        class="rounded-sm bg-transparent px-1.5 py-0.5 text-[13.5px] text-[var(--ink)] outline-none hover:bg-[var(--accent)] focus:bg-[var(--accent)] focus:ring-1 focus:ring-[var(--ring)]/40"
+        @change="onEndDate"
+      />
+    </div>
+    <div
+      v-else
+      class="flex items-center rounded-sm px-2 py-[5px] text-[13.5px] hover:bg-[var(--accent)]"
+    >
       {{ dateRange }}
     </div>
 
@@ -81,9 +117,28 @@ function memberColor(m, i) {
       <span
         v-for="(m, i) in members"
         :key="m.id"
-        class="inline-flex items-center gap-1.5 rounded-full bg-[var(--accent)] py-0.5 pr-2.5 pl-[3px] text-[12.5px] font-medium"
+        class="group/companion inline-flex items-center gap-1.5 rounded-full bg-[var(--accent)] py-0.5 pr-2.5 pl-[3px] text-[12.5px] font-medium"
       >
+        <!-- 아바타: 관리자가 호버하면 이 자리에 빨간 X 가 덮인다(레이아웃 그대로, 클릭 시 제거). -->
+        <button
+          v-if="editable"
+          type="button"
+          class="relative grid size-[18px] place-items-center rounded-full text-[10px] font-bold text-white"
+          :style="{ backgroundColor: memberColor(m, i) }"
+          :aria-label="`${m.name} 동행에서 빼기`"
+          @click.stop="emit('remove-companion', m.id)"
+        >
+          <span class="transition group-hover/companion:opacity-0 group-focus-within/companion:opacity-0">{{
+            m.initial
+          }}</span>
+          <span
+            class="absolute inset-0 grid place-items-center rounded-full bg-[var(--destructive)] opacity-0 transition group-hover/companion:opacity-100 group-focus-within/companion:opacity-100"
+          >
+            <X class="size-3" />
+          </span>
+        </button>
         <span
+          v-else
           class="grid size-[18px] place-items-center rounded-full text-[10px] font-bold text-white"
           :style="{ backgroundColor: memberColor(m, i) }"
           >{{ m.initial }}</span

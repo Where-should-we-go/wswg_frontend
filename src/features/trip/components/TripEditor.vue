@@ -35,8 +35,8 @@ import { setTripTitleOverride } from '@/stores/tripUiState'
 
 const props = defineProps({
   trip: { type: Object, required: true },
-  // 소유자 여부(삭제 노출). user_id === 현재 사용자.
-  isOwner: { type: Boolean, default: false },
+  // 삭제 노출 여부. 개인 여행=본인, 그룹 여행=그룹 소유자.
+  canDelete: { type: Boolean, default: false },
 })
 
 const emit = defineEmits(['delete'])
@@ -72,6 +72,21 @@ function onTitleInput(e) {
 function onTitleCompositionEnd(e) {
   titleComposing.value = false
   commitTitle(e.target.value) // 최종 확정 보정
+}
+
+// 여행 기간 변경. 일자가 줄면 사라진 날의 일정이 남은 날짜로 분산되므로 안내한다.
+function onSetDates({ startDate, endDate }) {
+  const prevDayCount = ed.days.value.length
+  ed.setDates(startDate, endDate)
+  if (ed.days.value.length < prevDayCount) {
+    toast('기간이 줄어 사라진 날의 일정을 남은 날짜로 옮겼어요. 위치를 확인해 주세요.')
+  }
+}
+
+// 동행자를 이 여행에서만 뺀다(그룹 멤버십은 유지).
+function onRemoveCompanion(memberId) {
+  ed.removeCompanion(memberId)
+  toast('이 여행의 동행에서 뺐어요')
 }
 
 // 일정 뷰 보조 토글: 'rail' | 'calendar'
@@ -388,8 +403,13 @@ function syncLabel() {
       @compositionend="onTitleCompositionEnd"
     />
 
-    <!-- 속성 테이블 -->
-    <TripPropertyTable :trip="ed.trip.value" />
+    <!-- 속성 테이블 (소유자는 날짜 직접 수정 가능) -->
+    <TripPropertyTable
+      :trip="ed.trip.value"
+      :editable="canDelete"
+      @set-dates="onSetDates"
+      @remove-companion="onRemoveCompanion"
+    />
 
     <div class="my-[18px] h-px bg-[var(--border)]" />
 
@@ -501,7 +521,7 @@ function syncLabel() {
     </TripViewTabs>
 
     <!-- 소유자: 여행 삭제 -->
-    <div v-if="isOwner && !ed.isEmpty.value" class="mt-12 border-t border-[var(--border)] pt-6">
+    <div v-if="canDelete && !ed.isEmpty.value" class="mt-12 border-t border-[var(--border)] pt-6">
       <Button variant="ghost" class="text-[var(--danger)]" @click="confirmDeleteOpen = true">
         여행 삭제하기
       </Button>

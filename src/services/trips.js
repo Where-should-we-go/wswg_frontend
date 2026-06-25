@@ -13,6 +13,8 @@ function adaptTrip(dto, members) {
   const data = dto?.data && typeof dto.data === 'object' ? { ...dto.data } : { items: [] }
   if (!Array.isArray(data.items)) data.items = []
   const meta = data.meta && typeof data.meta === 'object' ? data.meta : {}
+  // 이 여행에서만 뺀 동행자(그룹 멤버십은 유지). 표시 멤버에서 제외한다.
+  const removed = Array.isArray(meta.removedMemberIds) ? meta.removedMemberIds.map(String) : []
   return {
     trip_id: dto.tripId,
     title: dto.title ?? '',
@@ -26,7 +28,7 @@ function adaptTrip(dto, members) {
     region: meta.region ?? null,
     budgetLabel: meta.budgetLabel ?? '',
     styles: meta.styles ?? [],
-    members: members ?? [],
+    members: (members ?? []).filter((m) => !removed.includes(String(m.id))),
     presence: [],
     data,
   }

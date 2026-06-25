@@ -100,7 +100,10 @@ const regionStats = computed(() => {
     }
     prev.count += 1
     prev.types.add(item.mediaType)
-    if (!prev.photo && item.mediaType === 'PHOTO' && item.mediaUrl) prev.photo = item.mediaUrl
+    // 대표로 선정한 사진을 우선 노출, 없으면 첫 사진을 권역 대표로 채운다.
+    if (item.mediaType === 'PHOTO' && item.mediaUrl && (item.representative || !prev.photo)) {
+      prev.photo = item.mediaUrl
+    }
     map.set(key, prev)
   }
   return [...map.values()].map((v) => ({ ...v, types: [...v.types] }))

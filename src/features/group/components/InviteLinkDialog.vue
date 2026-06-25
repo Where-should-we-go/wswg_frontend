@@ -75,7 +75,7 @@ watch(
         </component>
       </component>
 
-      <div class="px-1 pt-1">
+      <div class="min-w-0 px-1 pt-1">
         <div v-if="loading" class="flex flex-col gap-2">
           <Skeleton class="h-11 w-full" />
           <Skeleton class="h-4 w-32" />

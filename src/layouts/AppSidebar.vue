@@ -4,22 +4,37 @@
 // 모임 드롭다운으로 보고 있는 모임을 바꾸면 아래 내 여행/참여 중이 그 모임 것만 보인다('전체'면 모두).
 // 데이터는 서비스 레이어(mock↔실제 자동 전환)에서 로드 — 화면 본문과 정합.
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
-import { RouterLink, useRoute } from 'vue-router'
-import { Search, Users, Plus, ChevronDown } from '@lucide/vue'
+import { RouterLink, useRoute, useRouter } from 'vue-router'
+import { toast } from 'vue-sonner'
+import { Search, Users, Plus, ChevronDown, MoreHorizontal } from '@lucide/vue'
 import { NavItem } from '@/components/ui/nav-item'
 import {
   DropdownMenu,
   DropdownMenuTrigger,
   DropdownMenuContent,
+  DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
 } from '@/components/ui/dropdown-menu'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import { Button } from '@/components/ui/button'
 import { getGroups } from '@/services/groups'
 import { getMyTrips } from '@/services/mypage'
+import { deleteTrip } from '@/services/trips'
+import { getCurrentUser } from '@/services/auth'
 import { displayTripTitle } from '@/stores/tripUiState'
 
 const route = useRoute()
+const router = useRouter()
+const currentUserId = ref(null)
 
 const ALL = '__all__' // 드롭다운 '전체 여행' 센티넬
 
@@ -67,6 +82,11 @@ async function loadSidebar() {
 }
 
 onMounted(loadSidebar)
+onMounted(() => {
+  getCurrentUser()
+    .then((me) => (currentUserId.value = me?.id ?? null))
+    .catch(() => (currentUserId.value = null))
+})
 // 다른 화면에서 여행/모임을 만들고 돌아오면 트리도 최신으로(가벼운 갱신).
 watch(() => route.name, loadSidebar)
 
@@ -87,6 +107,49 @@ const visibleJoinedTrips = computed(() => filterByGroup(joinedTrips.value))
 // 현재 보고 있는 여행인지(활성 표시).
 function isActiveTrip(tripId) {
   return route.name === 'trip-editor' && String(route.params.id) === String(tripId)
+}
+
+// 삭제 권한(백엔드 validateWritable과 일치): 개인 여행은 본인(내 여행),
+// 그룹 여행은 그 모임의 소유자만. getGroups()가 ownerId를 주므로 사이드바에서 판정 가능.
+function canDeleteTrip(trip) {
+  if (trip.groupId == null) return true
+  const g = groups.value.find((x) => String(x.groupId) === String(trip.groupId))
+  return !!g && currentUserId.value != null && g.ownerId === currentUserId.value
+}
+
+// ── 삭제 ──────────────────────────────────────────────
+const deleteTarget = ref(null)
+const deleting = ref(false)
+const deleteOpen = computed({
+  get: () => deleteTarget.value !== null,
+  set: (v) => {
+    if (!v) deleteTarget.value = null
+  },
+})
+
+function askDelete(trip) {
+  deleteTarget.value = trip
+}
+
+async function confirmDelete() {
+  const target = deleteTarget.value
+  if (!target) return
+  deleting.value = true
+  try {
+    await deleteTrip(target.tripId)
+    toast.success('여행을 삭제했어요')
+    deleteTarget.value = null
+    // 지금 열려 있는 여행을 지웠으면 마이페이지로 이동.
+    if (route.name === 'trip-editor' && String(route.params.id) === String(target.tripId)) {
+      router.push('/mypage')
+    }
+    await loadSidebar()
+    window.dispatchEvent(new CustomEvent('wswg:groups-changed'))
+  } catch {
+    toast.error('삭제하지 못했어요. 잠시 후 다시 시도해 주세요.')
+  } finally {
+    deleting.value = false
+  }
 }
 </script>
 
@@ -141,16 +204,28 @@ function isActiveTrip(tripId) {
     <div class="px-2 pt-3.5 pb-[5px] text-[11px] font-bold tracking-[0.03em] text-[var(--ink-3)]">
       내 여행
     </div>
-    <NavItem
-      v-for="trip in visibleMyTrips"
-      :key="trip.tripId"
-      :as="RouterLink"
-      :to="`/trips/${trip.tripId}`"
-      emoji="🧳"
-      :label="displayTripTitle(trip.tripId, trip.title)"
-      page
-      :active="isActiveTrip(trip.tripId)"
-    />
+    <div v-for="trip in visibleMyTrips" :key="trip.tripId" class="group/triprow relative">
+      <NavItem
+        :as="RouterLink"
+        :to="`/trips/${trip.tripId}`"
+        emoji="🧳"
+        :label="displayTripTitle(trip.tripId, trip.title)"
+        page
+        :active="isActiveTrip(trip.tripId)"
+        class="pr-7"
+      />
+      <DropdownMenu v-if="canDeleteTrip(trip)">
+        <DropdownMenuTrigger
+          class="absolute top-1/2 right-1 grid size-6 -translate-y-1/2 place-items-center rounded text-[var(--ink-3)] opacity-0 transition-opacity group-hover/triprow:opacity-100 hover:bg-[var(--accent)] focus-visible:opacity-100 data-[state=open]:opacity-100"
+          aria-label="여행 메뉴 열기"
+        >
+          <MoreHorizontal class="size-4" />
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" class="w-32">
+          <DropdownMenuItem variant="destructive" @select="askDelete(trip)">삭제</DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </div>
     <p v-if="visibleMyTrips.length === 0" class="px-2 py-1 text-[12px] text-[var(--ink-3)]">
       {{ selectedGroupId === ALL ? '아직 여행이 없어요' : '이 모임의 여행이 없어요' }}
     </p>
@@ -159,16 +234,28 @@ function isActiveTrip(tripId) {
     <div class="px-2 pt-3.5 pb-[5px] text-[11px] font-bold tracking-[0.03em] text-[var(--ink-3)]">
       참여 중
     </div>
-    <NavItem
-      v-for="trip in visibleJoinedTrips"
-      :key="trip.tripId"
-      :as="RouterLink"
-      :to="`/trips/${trip.tripId}`"
-      emoji="🤝"
-      :label="displayTripTitle(trip.tripId, trip.title)"
-      page
-      :active="isActiveTrip(trip.tripId)"
-    />
+    <div v-for="trip in visibleJoinedTrips" :key="trip.tripId" class="group/triprow relative">
+      <NavItem
+        :as="RouterLink"
+        :to="`/trips/${trip.tripId}`"
+        emoji="🤝"
+        :label="displayTripTitle(trip.tripId, trip.title)"
+        page
+        :active="isActiveTrip(trip.tripId)"
+        class="pr-7"
+      />
+      <DropdownMenu v-if="canDeleteTrip(trip)">
+        <DropdownMenuTrigger
+          class="absolute top-1/2 right-1 grid size-6 -translate-y-1/2 place-items-center rounded text-[var(--ink-3)] opacity-0 transition-opacity group-hover/triprow:opacity-100 hover:bg-[var(--accent)] focus-visible:opacity-100 data-[state=open]:opacity-100"
+          aria-label="여행 메뉴 열기"
+        >
+          <MoreHorizontal class="size-4" />
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" class="w-32">
+          <DropdownMenuItem variant="destructive" @select="askDelete(trip)">삭제</DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </div>
     <p v-if="visibleJoinedTrips.length === 0" class="px-2 py-1 text-[12px] text-[var(--ink-3)]">
       {{
         selectedGroupId === ALL ? '참여 중인 여행이 없어요' : '이 모임에 참여 중인 여행이 없어요'
@@ -186,5 +273,23 @@ function isActiveTrip(tripId) {
       label="새 모임"
       class="mt-0.5"
     />
+
+    <!-- 여행 삭제 확인 -->
+    <Dialog v-model:open="deleteOpen">
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>이 여행을 삭제할까요?</DialogTitle>
+          <DialogDescription>
+            「{{ deleteTarget?.title }}」 일정이 사라져요. 이 작업은 되돌릴 수 없어요.
+          </DialogDescription>
+        </DialogHeader>
+        <DialogFooter>
+          <Button variant="ghost" :disabled="deleting" @click="deleteTarget = null">취소</Button>
+          <Button variant="destructive" :disabled="deleting" @click="confirmDelete">
+            {{ deleting ? '삭제 중…' : '삭제' }}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   </aside>
 </template>

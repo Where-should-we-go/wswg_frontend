@@ -94,16 +94,26 @@ describe('buildItinerary — 일정 조립(끼니 자동)', () => {
     longitude: 126,
   }))
 
-  it('하루 기본 시간표(관광3+식당2)를 시간대까지 배치한다', () => {
-    // 하루에 관광 3 + 식당 2 가 다 차는 경우.
+  it('관광지·식당을 한 동선으로 묶어 거리상 가까운 순으로 배치한다(식당 포함)', () => {
+    // 관광 3곳을 잇는 직선 위에 식당 2곳이 사이사이에 위치 → 동선상 식당이 끼어들어야 한다.
     const items = buildItinerary({
-      attractions, // 3
-      restaurants: restaurants.slice(0, 2), // 2
+      attractions: [
+        { contentId: 1, title: '관광A', contentTypeId: 12, latitude: 33.0, longitude: 126.0 },
+        { contentId: 2, title: '관광B', contentTypeId: 12, latitude: 33.2, longitude: 126.2 },
+        { contentId: 3, title: '관광C', contentTypeId: 12, latitude: 33.4, longitude: 126.4 },
+      ],
+      restaurants: [
+        { contentId: 101, title: '식당1', contentTypeId: RESTAURANT_CONTENT_TYPE_ID, latitude: 33.1, longitude: 126.1 },
+        { contentId: 102, title: '식당2', contentTypeId: RESTAURANT_CONTENT_TYPE_ID, latitude: 33.3, longitude: 126.3 },
+      ],
       startDate: '2026-07-01',
       endDate: '2026-07-01', // 1일
     })
+    // 동선: 관광A → 식당1 → 관광B → 식당2 → 관광C (식당이 거리순으로 사이에 배치된다)
+    expect(items.map((it) => it.title)).toEqual(['관광A', '식당1', '관광B', '식당2', '관광C'])
     expect(items.map((it) => it.type)).toEqual(['관광', '식당', '관광', '식당', '관광'])
-    expect(items.map((it) => it.time)).toEqual(['09:00', '12:00', '14:00', '18:00', '20:00'])
+    // 시간은 동선 순서대로 증가한다(점심·저녁 라벨은 식당 등장 순서).
+    expect(items.map((it) => it.time)).toEqual(['09:00', '11:30', '13:00', '15:30', '17:00'])
     expect(items.map((it) => it.durationMin)).toEqual([120, 60, 120, 60, 120])
     expect(items.map((it) => it.order)).toEqual([1, 2, 3, 4, 5])
     const meals = items.filter((it) => it.type === '식당')

@@ -268,6 +268,12 @@ export function useTripEditor(initialTrip) {
     } else if (type === 'meta.update') {
       const patch = msg.payload?.patch ?? {}
       if ('title' in patch) trip.value.title = patch.title
+      if ('startDate' in patch) trip.value.start_date = patch.startDate
+      if ('endDate' in patch) trip.value.end_date = patch.endDate
+      if ('removedMemberIds' in patch) {
+        const removed = new Set((patch.removedMemberIds ?? []).map(String))
+        trip.value.members = (trip.value.members ?? []).filter((m) => !removed.has(String(m.id)))
+      }
       trip.value.data.meta = { ...trip.value.data.meta, ...patch }
     }
   }
@@ -499,6 +505,49 @@ export function useTripEditor(initialTrip) {
     scheduleSave()
   }
 
+  // 여행 기간(시작·종료일) 변경. 날짜는 trips 컬럼이라 PUT 으로 영속.
+  //  - 일자가 늘면 빈 Day 가 자동으로 생긴다(days 계산이 dateRange 로 빈 날을 채움).
+  //  - 일자가 줄어 사라지는 날의 항목은 남은 날짜에 무작위로 분산한다(사용자가 직접 정리하도록).
+  function setDates(startDate, endDate) {
+    const start = startDate || null
+    const end = endDate || null
+    // 둘 다 있으면 시작 ≤ 종료. 역전이면 무시(입력 UI 의 min/max 로도 막지만 방어).
+    if (start && end && start > end) return
+
+    trip.value.start_date = start
+    trip.value.end_date = end
+
+    const range = dateRange(start, end)
+    if (range.length) {
+      const valid = new Set(range)
+      for (const it of items.value) {
+        if (!it.visitDate || valid.has(it.visitDate)) continue
+        // 사라지는 날의 항목 → 남은 날짜 중 아무 곳에나 던져 넣는다(맨 뒤 order 로).
+        const target = range[Math.floor(Math.random() * range.length)]
+        const maxOrder = items.value
+          .filter((x) => x.visitDate === target)
+          .reduce((m, x) => Math.max(m, x.order ?? 0), 0)
+        it.visitDate = target
+        it.order = maxOrder + 1
+      }
+    }
+    // 협업자에게 기간 변경을 라이브로 알리고(meta.update), 컬럼+데이터를 PUT 으로 영속.
+    scheduleMetaSend({ startDate: start, endDate: end })
+    scheduleSave()
+  }
+
+  // 동행자를 이 여행에서만 뺀다(그룹 멤버십은 그대로). data.meta.removedMemberIds 에 누적.
+  function removeCompanion(memberId) {
+    const id = String(memberId)
+    const meta = (trip.value.data.meta ??= {})
+    const next = new Set((meta.removedMemberIds ?? []).map(String))
+    next.add(id)
+    meta.removedMemberIds = [...next]
+    trip.value.members = (trip.value.members ?? []).filter((m) => String(m.id) !== id)
+    scheduleMetaSend({ removedMemberIds: meta.removedMemberIds })
+    scheduleSave()
+  }
+
   return {
     trip,
     items,
@@ -525,6 +574,8 @@ export function useTripEditor(initialTrip) {
     removeMedia,
     setRepresentative,
     setTitle,
+    setDates,
+    removeCompanion,
   }
 }
 
