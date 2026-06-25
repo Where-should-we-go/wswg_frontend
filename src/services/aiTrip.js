@@ -13,6 +13,7 @@ import { apiPost } from './api'
 import { USE_MOCK, mockDelay } from './config'
 import { createTrip } from './trips'
 import * as db from './mock/db'
+import { minutesToTime } from '@/features/trip/lib/calendar'
 
 // TourAPI 콘텐츠 타입: 음식점 = 39.
 export const RESTAURANT_CONTENT_TYPE_ID = 39
@@ -178,9 +179,18 @@ function nearestNeighborOrder(list) {
   return [...ordered, ...noCoord]
 }
 
-// 선택 관광지 + 식당으로 일자별 일정을 조립한다(DAY_PLAN 시간표대로).
-// 관광지는 일자 수만큼 라운드로빈 분배하고, 하루 안에서는 거리상 가까운 순으로 배치한다.
-// 하루 슬롯(관광 3)을 넘는 관광지는 시간 없이 뒤에 붙인다.
+// 항목 소요시간(분)·하루 시간창. 동선을 따라 09:00부터 누적 배치한다.
+const ATTRACTION_DURATION_MIN = 120
+const RESTAURANT_DURATION_MIN = 60
+const TRAVEL_BUFFER_MIN = 30
+const DAY_START_MIN = 9 * 60 // 09:00
+const DAY_END_MIN = 21 * 60 // 21:00 — 이후 시작하는 일정은 시간 미정으로 뒤에 남긴다.
+const MEAL_LABELS = ['점심', '저녁']
+
+// 선택 관광지 + 식당으로 일자별 일정을 조립한다.
+// 관광지는 일자 수만큼 라운드로빈 분배하고, 하루 안에서는 관광지·식당을 한 동선으로 묶어
+// 거리상 가까운 순(최근접 이웃)으로 배치한다. 식당도 위치에 따라 동선 사이에 끼어든다.
+// 동선 순서대로 09:00부터 소요시간을 누적해 시간을 매기고, 하루(21시)를 넘는 항목은 시간 미정으로 둔다.
 export function buildItinerary({ attractions = [], restaurants = [], startDate, endDate }) {
   const days = dayList(startDate, endDate)
   if (days.length === 0) return []
@@ -191,26 +201,28 @@ export function buildItinerary({ attractions = [], restaurants = [], startDate, 
   const items = []
   let seq = 0
   days.forEach((date, di) => {
-    const dayAttr = nearestNeighborOrder(attrBuckets[di])
     const dayRest = restaurants.slice(di * RESTAURANTS_PER_DAY, (di + 1) * RESTAURANTS_PER_DAY)
-    let ri = 0
-    const seqForDay = []
-    for (const slot of DAY_PLAN) {
-      if (slot.kind === '관광') {
-        const a = dayAttr.shift()
-        if (a) seqForDay.push(toItem(a, { type: '관광', date, time: slot.time, durationMin: slot.durationMin }))
-      } else {
-        const r = dayRest[ri++]
-        if (r) {
-          seqForDay.push(
-            toItem(r, { type: '식당', date, time: slot.time, durationMin: slot.durationMin, meal: slot.meal }),
-          )
-        }
+    // 관광지+식당을 하나의 동선으로 묶어 거리상 가까운 순으로 정렬.
+    const stops = nearestNeighborOrder(
+      [
+        ...attrBuckets[di].map((rec) => ({ rec, kind: '관광' })),
+        ...dayRest.map((rec) => ({ rec, kind: '식당' })),
+      ].map((s) => ({ ...s, latitude: s.rec.latitude ?? null, longitude: s.rec.longitude ?? null })),
+    )
+
+    let cursor = DAY_START_MIN
+    let mealIdx = 0
+    stops.forEach((s, i) => {
+      const isRest = s.kind === '식당'
+      const durationMin = isRest ? RESTAURANT_DURATION_MIN : ATTRACTION_DURATION_MIN
+      // 하루 시간창 안에 들어오면 시간 배정, 넘치면 시간 미정(캘린더에서 직접 배치).
+      let time = null
+      if (cursor + durationMin <= DAY_END_MIN) {
+        time = minutesToTime(cursor)
+        cursor += durationMin + TRAVEL_BUFFER_MIN
       }
-    }
-    // 슬롯(관광 3)을 넘는 선택 관광지는 시간 없이 뒤에 붙여 캘린더에서 배치.
-    dayAttr.forEach((a) => seqForDay.push(toItem(a, { type: '관광', date, durationMin: 120 })))
-    seqForDay.forEach((it, i) => {
+      const meal = isRest ? MEAL_LABELS[mealIdx++] : undefined
+      const it = toItem(s.rec, { type: s.kind, date, time, durationMin, meal })
       it.id = `ai-${++seq}`
       it.order = i + 1
       items.push(it)
