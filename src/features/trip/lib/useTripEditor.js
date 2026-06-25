@@ -8,27 +8,10 @@ import { ref, computed, onMounted, onBeforeUnmount, getCurrentInstance } from 'v
 import { updateTrip } from '@/services/trips'
 import { typeKeyOf } from '@/features/trip/lib/blockMeta'
 import { timeToMinutes, minutesToTime, DEFAULT_DURATION_MIN } from '@/features/trip/lib/calendar'
+import { blankBlock, buildPlaceBlock } from '@/features/trip/lib/placeBlock'
 import { USE_MOCK } from '@/services/config'
 import * as authService from '@/services/auth'
 import { createPlanSocket, userIdFromToken } from '@/features/trip/lib/planSocket'
-
-// 새 블록 기본값(슬래시 메뉴 / + 버튼에서 추가).
-function blankBlock(koType, visitDate, order) {
-  return {
-    id: `b-${Date.now().toString(36)}-${Math.floor(Math.random() * 1e4)}`,
-    content_id: null,
-    title: '',
-    type: koType,
-    lat: null,
-    lng: null,
-    visitDate,
-    time: null,
-    durationMin: null,
-    order,
-    media: [],
-    properties: {},
-  }
-}
 
 // 타임라인 정렬: 시간 있는 블록은 시각 오름차순(같으면 order), 시간 미정은 맨 뒤에서 order 순.
 // 일정은 시간 순서로 보여야 하므로, 시간 있는 블록끼리는 수동 order 가 아니라 time 으로 정렬한다.
@@ -39,13 +22,6 @@ function compareForTimeline(a, b) {
   if (ta) return -1 // 시간 있는 블록을 시간 미정보다 앞에
   if (tb) return 1
   return (a.order ?? 0) - (b.order ?? 0) // 둘 다 시간 미정 → 수동 order
-}
-
-// TourAPI contentTypeId → 블록 한글 타입. 음식점=39, 숙박=32, 그 외는 관광.
-function koTypeForContentType(contentTypeId) {
-  if (contentTypeId === 39) return '식당'
-  if (contentTypeId === 32) return '숙소'
-  return '관광'
 }
 
 const PLACEHOLDER_BY_TYPE = {
@@ -354,18 +330,7 @@ export function useTripEditor(initialTrip) {
     if (!place) return null
     const sameDay = items.value.filter((b) => b.visitDate === visitDate)
     const maxOrder = sameDay.reduce((m, b) => Math.max(m, b.order ?? 0), 0)
-    const block = blankBlock(koTypeForContentType(place.contentTypeId), visitDate, maxOrder + 1)
-    block.content_id = place.contentId ?? null
-    block.title = place.title ?? ''
-    // 실서버 상세는 latitude/longitude, mock 은 mapY/mapX 를 쓴다(둘 다 수용).
-    block.lat = place.latitude ?? place.mapY ?? null
-    block.lng = place.longitude ?? place.mapX ?? null
-    if (place.firstImage1) block.media = [{ type: 'PHOTO', url: place.firstImage1, metadata: {} }]
-    const region = [place.sidoName, place.gugunName].filter(Boolean).join(' ')
-    block.properties = {
-      ...(region ? { region } : {}),
-      ...(place.addr1 ? { address: place.addr1 } : {}),
-    }
+    const block = buildPlaceBlock(place, { visitDate, order: maxOrder + 1 })
     trip.value.data.items.push(block)
     commitEdit('block.add', { block }, block.id)
     return block

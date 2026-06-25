@@ -23,6 +23,9 @@ function makeRouter() {
       },
       { path: '/login', name: 'login', component: { template: '<div />' } },
       { path: '/mypage', name: 'mypage', component: { template: '<div />' } },
+      { path: '/groups', name: 'groups', component: { template: '<div />' } },
+      { path: '/plans/new', name: 'plan-new', component: { template: '<div />' } },
+      { path: '/trips/:id', name: 'trip-editor', component: { template: '<div />' } },
     ],
   })
   router.push('/attractions')
@@ -32,12 +35,13 @@ function makeRouter() {
 async function mountView() {
   const router = makeRouter()
   await router.isReady()
-  const wrapper = mount(AttractionsView, { global: { plugins: [router] } })
+  const wrapper = mount(AttractionsView, { attachTo: document.body, global: { plugins: [router] } })
   return { wrapper, router }
 }
 
 describe('S3 관광지 검색·목록', () => {
   beforeEach(() => {
+    document.body.innerHTML = ''
     window.matchMedia = vi.fn().mockImplementation((query) => ({
       matches: true,
       media: query,
@@ -92,5 +96,39 @@ describe('S3 관광지 검색·목록', () => {
       },
       { timeout: 3000, interval: 50 },
     )
+  })
+
+  it('검색 결과에서 여행지를 바로 여행에 담는다', async () => {
+    const { wrapper, router } = await mountView()
+    await vi.waitFor(() => expect(wrapper.text()).toContain('경복궁'), {
+      timeout: 3000,
+      interval: 50,
+    })
+
+    const addButton = wrapper.findAll('button').find((button) => button.text().includes('여행지 담기'))
+    expect(addButton).toBeTruthy()
+    await addButton.trigger('click')
+    await flushPromises()
+
+    await vi.waitFor(() => expect(document.body.textContent).toContain('어느 여행에 담을까요?'), {
+      timeout: 3000,
+      interval: 50,
+    })
+
+    await vi.waitFor(() => expect(document.body.textContent).toContain('2026-07-01 ~ 2026-07-03'), {
+      timeout: 3000,
+      interval: 50,
+    })
+    const tripButton = [...document.querySelectorAll('button')].find((button) =>
+      button.textContent?.includes('부산 2박 3일'),
+    )
+    expect(tripButton).toBeTruthy()
+    tripButton.click()
+    await flushPromises()
+
+    await vi.waitFor(() => expect(router.currentRoute.value.path).toBe('/trips/10'), {
+      timeout: 3000,
+      interval: 50,
+    })
   })
 })
