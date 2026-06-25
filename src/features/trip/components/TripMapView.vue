@@ -1,13 +1,15 @@
 <script setup>
 // TripMapView — 여행 기록 지도.
-// lat/lng 가 있는 블록을 2D 지도 좌표로 정규화하고, 블록 media[] 로 지도 실루엣을 채운다.
-// Naver Maps SDK 키가 붙기 전에도 동일 데이터 계약으로 동작한다.
-import { computed, ref } from 'vue'
+// lat/lng 가 있는 블록을 실제 네이버 지도 위에 방문 순서대로 마커로 찍고,
+// 마커를 누르면 그 장소의 사진·녹음·영상을 펼쳐 본다.
+// 인증 키(VITE_NAVER_MAP_CLIENT_ID)가 없거나 로드에 실패해도 미디어 목록은 그대로 동작한다.
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { Star } from '@lucide/vue'
 import EmptyState from '@/components/common/EmptyState.vue'
 import AddBlockRow from './AddBlockRow.vue'
 import MediaLightbox from './MediaLightbox.vue'
 import { typeEmojiOf, railColorOf } from '@/features/trip/lib/blockMeta'
+import { hasNaverClientId, loadNaverMaps, onAuthFailure } from '@/features/trip/lib/naverMaps'
 
 const props = defineProps({
   items: { type: Array, default: () => [] },
@@ -28,53 +30,16 @@ const pinned = computed(() =>
     }),
 )
 
-// bounding box → 0~1 비율 좌표(여백 10%). 핀 1개면 중앙.
-const layout = computed(() => {
-  const pts = pinned.value
-  if (!pts.length) return []
-  const lats = pts.map((p) => p.lat)
-  const lngs = pts.map((p) => p.lng)
-  const minLat = Math.min(...lats)
-  const maxLat = Math.max(...lats)
-  const minLng = Math.min(...lngs)
-  const maxLng = Math.max(...lngs)
-  const spanLat = maxLat - minLat || 1
-  const spanLng = maxLng - minLng || 1
-  const pad = 0.1
-  const span = 1 - pad * 2
-  const counts = new Map()
-  return pts.map((b, i) => {
-    const coordKey = `${Number(b.lat).toFixed(5)}:${Number(b.lng).toFixed(5)}`
-    const overlapIndex = counts.get(coordKey) ?? 0
-    counts.set(coordKey, overlapIndex + 1)
-    const baseX = pts.length === 1 ? 50 : (pad + ((b.lng - minLng) / spanLng) * span) * 100
-    const baseY = pts.length === 1 ? 50 : (pad + ((maxLat - b.lat) / spanLat) * span) * 100
-    const angle = overlapIndex * 1.8
-    const offset = overlapIndex ? 3.2 : 0
-    return {
-      block: b,
-      // 위도가 클수록 위(상단) → y 반전.
-      x: Math.min(94, Math.max(6, baseX + Math.cos(angle) * offset)),
-      y: Math.min(94, Math.max(6, baseY + Math.sin(angle) * offset)),
-      emoji: typeEmojiOf(b.type),
-      color: railColorOf(b.type),
-      order: i + 1,
-    }
-  })
-})
-
-const active = ref(null)
-const lightbox = ref(null)
-
 const mediaMarkers = computed(() =>
-  layout.value.flatMap((point) =>
-    (point.block.media ?? []).map((media, mediaIndex) => ({
-      key: `${point.block.id}-${mediaIndex}`,
-      blockId: point.block.id,
-      blockTitle: point.block.title,
+  pinned.value.flatMap((block, order) =>
+    (block.media ?? []).map((media, mediaIndex) => ({
+      key: `${block.id}-${mediaIndex}`,
+      blockId: block.id,
+      blockTitle: block.title,
+      visitDate: block.visitDate,
+      order: order + 1,
       mediaIndex,
       media,
-      point,
       type: normalizeMediaType(media.type),
       representative: !!media.representative,
     })),
@@ -84,19 +49,6 @@ const mediaMarkers = computed(() =>
 const mediaCount = computed(() => mediaMarkers.value.length)
 const photoCount = computed(() => mediaMarkers.value.filter((m) => m.type === 'PHOTO').length)
 const audioVideoCount = computed(() => mediaMarkers.value.filter((m) => m.type !== 'PHOTO').length)
-const mapFillTiles = computed(() => {
-  const markers = mediaMarkers.value
-  if (!markers.length) return []
-  const minTiles = Math.max(18, markers.length * 5)
-  return Array.from({ length: minTiles }, (_, index) => {
-    const marker = markers[index % markers.length]
-    return {
-      ...marker,
-      tileKey: `${marker.key}-fill-${index}`,
-      muted: index >= markers.length,
-    }
-  })
-})
 
 function normalizeMediaType(type) {
   const normalized = String(type ?? '').toUpperCase()
@@ -121,34 +73,166 @@ function markerShapeClass(type) {
   return 'rounded-[6px]'
 }
 
-function tileToneClass(type) {
-  if (type === 'VIDEO') return 'bg-[#2f5f7a] text-white'
-  if (type === 'AUDIO') return 'bg-[#6f8f74] text-white'
-  return 'bg-[var(--bg-subtle)] text-[var(--ink-2)]'
+function mediaAtBlock(blockId) {
+  return mediaMarkers.value.filter((m) => m.blockId === blockId)
 }
 
-function markerOffset(mediaIndex, total) {
-  if (total <= 1) return { x: 0, y: 0 }
-  const angle = (Math.PI * 2 * mediaIndex) / total - Math.PI / 2
-  const radius = Math.min(7, 3.5 + total)
-  return { x: Math.cos(angle) * radius, y: Math.sin(angle) * radius }
+// ── 네이버 지도 ──────────────────────────────────────────────
+const mapEl = ref(null)
+// 'idle' | 'loading' | 'ready' | 'no-key' | 'error'
+const mapStatus = ref('idle')
+const selectedId = ref(null)
+
+const selectedBlock = computed(() => pinned.value.find((b) => b.id === selectedId.value) ?? null)
+const selectedIndex = computed(() => pinned.value.findIndex((b) => b.id === selectedId.value))
+const selectedMedia = computed(() =>
+  selectedBlock.value ? mediaAtBlock(selectedBlock.value.id) : [],
+)
+
+let maps = null // window.naver.maps 네임스페이스
+let mapInstance = null
+let markers = []
+let polyline = null
+let removeAuthListener = null
+// 디자인 토큰(--primary)을 SDK 가 읽을 수 있는 실제 색 문자열로 변환해 둔다.
+let brandColor = '#2c6fe3'
+
+function readBrandColor() {
+  if (typeof window === 'undefined') return brandColor
+  const v = getComputedStyle(document.documentElement).getPropertyValue('--primary').trim()
+  return v || brandColor
 }
 
-function mediaAtBlock(block) {
-  return mediaMarkers.value.filter((m) => m.blockId === block.id)
+function markerContent(block, order) {
+  const color = railColorOf(block.type)
+  const emoji = typeEmojiOf(block.type)
+  return `
+    <div style="position:relative;transform:translate(-50%,-100%);cursor:pointer;">
+      <div style="display:flex;align-items:center;justify-content:center;width:30px;height:30px;border-radius:9999px;border:2px solid #fff;background:${color};font-size:15px;box-shadow:0 4px 10px rgba(0,0,0,.25);">${emoji}</div>
+      <div style="position:absolute;top:-7px;right:-7px;min-width:17px;height:17px;padding:0 4px;display:flex;align-items:center;justify-content:center;border-radius:9999px;background:#fff;border:1px solid ${brandColor};color:${brandColor};font-size:11px;font-weight:700;line-height:1;">${order}</div>
+      <div style="position:absolute;left:50%;bottom:-6px;transform:translateX(-50%);width:0;height:0;border-left:5px solid transparent;border-right:5px solid transparent;border-top:7px solid #fff;"></div>
+    </div>`
 }
 
-function mediaStyle(marker) {
-  const siblings = mediaAtBlock(marker.point.block)
-  const offset = markerOffset(marker.mediaIndex, siblings.length)
-  return {
-    left: `calc(${marker.point.x}% + ${offset.x}px)`,
-    top: `calc(${marker.point.y}% + ${offset.y}px)`,
+function clearOverlays() {
+  for (const m of markers) m.setMap(null)
+  markers = []
+  if (polyline) {
+    polyline.setMap(null)
+    polyline = null
   }
 }
 
+function renderOverlays() {
+  if (!maps || !mapInstance) return
+  clearOverlays()
+
+  const pts = pinned.value
+  if (!pts.length) return
+
+  const bounds = new maps.LatLngBounds()
+  const path = []
+
+  pts.forEach((block, index) => {
+    const pos = new maps.LatLng(Number(block.lat), Number(block.lng))
+    bounds.extend(pos)
+    path.push(pos)
+
+    const marker = new maps.Marker({
+      position: pos,
+      map: mapInstance,
+      title: block.title,
+      icon: {
+        content: markerContent(block, index + 1),
+        anchor: new maps.Point(15, 38),
+      },
+      zIndex: 100 + index,
+    })
+    maps.Event.addListener(marker, 'click', () => {
+      selectedId.value = block.id
+      mapInstance.panTo(pos)
+    })
+    markers.push(marker)
+  })
+
+  if (path.length > 1) {
+    polyline = new maps.Polyline({
+      map: mapInstance,
+      path,
+      strokeColor: brandColor,
+      strokeWeight: 3,
+      strokeOpacity: 0.7,
+      strokeStyle: 'shortdash',
+    })
+  }
+
+  if (pts.length === 1) {
+    mapInstance.setCenter(path[0])
+    mapInstance.setZoom(14)
+  } else {
+    mapInstance.fitBounds(bounds, { top: 56, right: 32, bottom: 32, left: 32 })
+  }
+}
+
+async function initMap() {
+  if (!hasNaverClientId()) {
+    mapStatus.value = 'no-key'
+    return
+  }
+  mapStatus.value = 'loading'
+  try {
+    maps = await loadNaverMaps()
+    if (!mapEl.value) return
+    brandColor = readBrandColor()
+    mapInstance = new maps.Map(mapEl.value, {
+      center: new maps.LatLng(36.5, 127.8), // 대한민국 중앙(첫 렌더 직후 fitBounds 로 덮어씀)
+      zoom: 7,
+      scaleControl: false,
+      mapDataControl: false,
+      logoControlOptions: { position: maps.Position.BOTTOM_LEFT },
+      zoomControl: true,
+      zoomControlOptions: { position: maps.Position.TOP_RIGHT },
+    })
+    mapStatus.value = 'ready'
+    renderOverlays()
+  } catch (err) {
+    mapStatus.value = err?.message === 'NAVER_MAP_CLIENT_ID_MISSING' ? 'no-key' : 'error'
+  }
+}
+
+onMounted(() => {
+  removeAuthListener = onAuthFailure(() => {
+    mapStatus.value = 'error'
+  })
+  if (pinned.value.length) initMap()
+})
+
+onBeforeUnmount(() => {
+  clearOverlays()
+  if (mapInstance) {
+    mapInstance.destroy?.()
+    mapInstance = null
+  }
+  if (removeAuthListener) removeAuthListener()
+})
+
+// 핀(좌표) 목록이 바뀌면 지도를 다시 그린다. 아직 지도가 없으면(첫 핀) 초기화.
+watch(
+  () => pinned.value.map((b) => `${b.id}:${b.lat}:${b.lng}`).join('|'),
+  () => {
+    if (selectedId.value && !pinned.value.some((b) => b.id === selectedId.value)) {
+      selectedId.value = null
+    }
+    if (mapStatus.value === 'ready') renderOverlays()
+    else if (mapStatus.value === 'idle' && pinned.value.length) initMap()
+  },
+)
+
+// ── 미디어 라이트박스 ────────────────────────────────────────
+const lightbox = ref(null)
+
 function openMedia(marker) {
-  active.value = marker.blockId
+  selectedId.value = marker.blockId
   lightbox.value = marker
 }
 
@@ -171,7 +255,7 @@ function deleteMedia(marker) {
 <template>
   <div>
     <EmptyState
-      v-if="!layout.length"
+      v-if="!pinned.length"
       icon="🗺️"
       title="지도에 표시할 장소가 없어요"
       description="관광지·식당 블록에 위치가 들어오면 지도에 핀으로 보여요."
@@ -181,162 +265,108 @@ function deleteMedia(marker) {
       v-else
       class="relative aspect-[16/10] w-full overflow-hidden rounded-[var(--radius-win)] border border-[var(--border)] bg-[var(--sunken)]"
     >
-      <!-- 지도 바탕: 물/녹지/도로 느낌의 가벼운 2D 맵 -->
-      <div class="absolute inset-0 bg-[linear-gradient(135deg,#dfeef3_0%,#eef6f1_42%,#f7f2e6_100%)]" />
-      <div
-        class="absolute -left-[8%] top-[10%] h-[46%] w-[48%] rounded-[48%] bg-[#b9d9e8]/55 blur-[1px]"
-        aria-hidden="true"
-      />
-      <div
-        class="absolute right-[4%] bottom-[2%] h-[34%] w-[38%] rounded-[48%] bg-[#cfe5c9]/60"
-        aria-hidden="true"
-      />
-      <div
-        class="absolute inset-0 opacity-50"
-        style="
-          background-image:
-            linear-gradient(28deg, transparent 0 41%, rgba(255,255,255,.9) 41.4% 42.2%, transparent 42.7%),
-            linear-gradient(118deg, transparent 0 55%, rgba(255,255,255,.82) 55.3% 56.2%, transparent 56.8%),
-            linear-gradient(0deg, rgba(255,255,255,.24), rgba(255,255,255,.24));
-        "
-        aria-hidden="true"
-      />
+      <!-- 실제 네이버 지도가 그려지는 캔버스 -->
+      <div ref="mapEl" class="absolute inset-0 h-full w-full" />
 
-      <!-- 지도 실루엣을 미디어로 채운 콜라주. 실제 지도 SDK가 붙으면 이 레이어만 지도 폴리곤에 맞추면 된다. -->
+      <!-- 로딩 -->
       <div
-        class="map-media-shape absolute inset-x-[8%] inset-y-[10%] z-[1] overflow-hidden border border-white/75 bg-white/55 shadow-[var(--shadow-soft)]"
-        aria-label="미디어로 채운 여행 지도"
+        v-if="mapStatus === 'loading'"
+        class="absolute inset-0 z-[2] grid place-items-center bg-[var(--sunken)] text-[13px] text-[var(--ink-3)]"
+      >
+        지도를 불러오는 중…
+      </div>
+
+      <!-- 키 미설정 / 인증·로드 실패 -->
+      <div
+        v-else-if="mapStatus === 'no-key' || mapStatus === 'error'"
+        class="absolute inset-0 z-[2] grid place-items-center bg-[var(--bg-subtle)] p-6 text-center"
       >
         <div
-          v-if="mapFillTiles.length"
-          class="grid h-full w-full grid-cols-6 auto-rows-fr gap-[3px] bg-white/60 p-[3px]"
+          class="max-w-sm rounded-[var(--radius-win)] border border-[var(--border)] bg-[var(--card)] px-5 py-4 shadow-[var(--shadow-soft)]"
         >
-          <button
-            v-for="tile in mapFillTiles"
-            :key="tile.tileKey"
-            type="button"
-            class="relative min-h-0 overflow-hidden transition-transform hover:z-[2] hover:scale-105"
-            :class="[tileToneClass(tile.type), tile.muted ? 'opacity-55' : 'opacity-95']"
-            :aria-label="`${tile.blockTitle} ${mediaLabel(tile.type)} 보기`"
-            @click="openMedia(tile)"
-          >
-            <img
-              v-if="tile.type === 'PHOTO' && tile.media.url"
-              :src="tile.media.url"
-              alt=""
-              class="h-full w-full object-cover"
-            />
-            <span
-              v-else
-              class="grid h-full w-full place-items-center text-[18px]"
-              :class="tile.type === 'PHOTO' ? 'bg-[linear-gradient(135deg,#ffffff,#e8f1f4)]' : ''"
-              aria-hidden="true"
-            >
-              {{ mediaIcon(tile.type) }}
-            </span>
-            <span
-              v-if="tile.representative && !tile.muted"
-              class="absolute top-1 right-1 grid size-4 place-items-center rounded-full bg-[var(--brand)] text-[9px] text-white"
-              aria-hidden="true"
-            >
-              ★
-            </span>
-          </button>
-        </div>
-        <div
-          v-else
-          class="grid h-full w-full place-items-center bg-[linear-gradient(135deg,rgba(255,255,255,.76),rgba(255,255,255,.32))] text-[12px] font-semibold text-[var(--ink-3)]"
-        >
-          미디어가 쌓이면 지도 모양으로 채워져요
+          <p class="text-[14px] font-semibold text-[var(--ink)]">
+            {{ mapStatus === 'no-key' ? '네이버 지도 키가 설정되지 않았어요' : '네이버 지도 인증에 실패했어요' }}
+          </p>
+          <p class="mt-1 text-[12.5px] leading-relaxed text-[var(--ink-3)]">
+            <template v-if="mapStatus === 'no-key'">
+              <code class="rounded bg-[var(--bg-subtle)] px-1">.env</code> 에
+              <code class="rounded bg-[var(--bg-subtle)] px-1">VITE_NAVER_MAP_CLIENT_ID</code> 를 넣어주세요.
+            </template>
+            <template v-else>
+              Client ID 와 NCP 콘솔에 등록한 서비스 URL(도메인)을 확인해 주세요.
+            </template>
+          </p>
+          <p class="mt-2 text-[12px] text-[var(--ink-3)]">
+            위치가 있는 장소 <b class="text-[var(--ink)]">{{ pinned.length }}곳</b> 의 미디어는 아래 목록에서 볼 수 있어요.
+          </p>
         </div>
       </div>
 
+      <!-- 통계 배지 -->
       <div
-        class="absolute top-3 left-3 z-[2] flex flex-wrap items-center gap-2 rounded-[var(--radius)] border border-white/70 bg-white/85 px-3 py-2 text-[12px] text-[var(--ink-2)] shadow-[var(--shadow-soft)]"
+        v-if="mapStatus === 'ready'"
+        class="pointer-events-none absolute top-3 left-3 z-[2] flex flex-wrap items-center gap-2 rounded-[var(--radius)] border border-white/70 bg-white/85 px-3 py-2 text-[12px] text-[var(--ink-2)] shadow-[var(--shadow-soft)]"
       >
-        <b class="text-[var(--ink)]">{{ layout.length }}곳</b>
+        <b class="text-[var(--ink)]">{{ pinned.length }}곳</b>
         <span>미디어 {{ mediaCount }}개</span>
         <span>사진 {{ photoCount }} · 녹음/영상 {{ audioVideoCount }}</span>
       </div>
 
-      <!-- 연결선(방문 순서) -->
-      <svg class="pointer-events-none absolute inset-0 h-full w-full" aria-hidden="true">
-        <polyline
-          v-if="layout.length > 1"
-          :points="layout.map((p) => `${p.x}%,${p.y}%`).join(' ')"
-          fill="none"
-          stroke="var(--brand)"
-          stroke-width="2"
-          stroke-dasharray="5 5"
-          opacity="0.5"
-          vector-effect="non-scaling-stroke"
-        />
-      </svg>
-
-      <!-- 장소 핀 -->
-      <button
-        v-for="p in layout"
-        :key="p.block.id"
-        type="button"
-        class="absolute z-[2] -translate-x-1/2 -translate-y-full"
-        :style="{ left: `${p.x}%`, top: `${p.y}%` }"
-        @click="active = active === p.block.id ? null : p.block.id"
-        @mouseenter="active = p.block.id"
+      <!-- 선택한 장소 카드 -->
+      <div
+        v-if="mapStatus === 'ready' && selectedBlock"
+        class="absolute right-3 bottom-3 left-3 z-[3] mx-auto max-w-md rounded-[var(--radius-win)] border border-[var(--border)] bg-[var(--card)]/95 p-3 shadow-[var(--shadow-pop)] backdrop-blur"
       >
-        <span
-          class="flex size-7 items-center justify-center rounded-full border-2 border-white text-[13px] shadow-[var(--shadow-pop)]"
-          :style="{ backgroundColor: p.color }"
-          aria-hidden="true"
-        >
-          {{ p.emoji }}
-        </span>
-        <!-- 라벨(활성 핀) -->
-        <span
-          v-if="active === p.block.id"
-          class="absolute bottom-full left-1/2 mb-1 -translate-x-1/2 whitespace-nowrap rounded-md bg-[var(--popover)] px-2 py-1 text-[12px] font-medium text-[var(--ink)] shadow-[var(--shadow-pop)]"
-        >
-          {{ p.order }}. {{ p.block.title }}
-        </span>
-      </button>
-
-      <!-- 미디어 앵커: 콜라주 위에서 원본 장소 위치를 짚어준다. -->
-      <button
-        v-for="marker in mediaMarkers"
-        :key="marker.key"
-        type="button"
-        class="absolute z-[3] flex size-8 -translate-x-1/2 -translate-y-1/2 items-center justify-center border-2 border-white bg-[var(--card)] text-[13px] shadow-[var(--shadow-pop)] transition-transform hover:scale-110"
-        :class="markerShapeClass(marker.type)"
-        :style="mediaStyle(marker)"
-        :aria-label="`${marker.blockTitle} ${mediaLabel(marker.type)} 보기`"
-        @click="openMedia(marker)"
-      >
-        <img
-          v-if="marker.type === 'PHOTO' && marker.media.url"
-          :src="marker.media.url"
-          alt=""
-          class="h-full w-full object-cover"
-          :class="markerShapeClass(marker.type)"
-        />
-        <span
-          v-else
-          class="grid h-full w-full place-items-center bg-[linear-gradient(135deg,var(--brand-soft),var(--bg-subtle))]"
-          :class="markerShapeClass(marker.type)"
-          aria-hidden="true"
-        >
-          {{ mediaIcon(marker.type) }}
-        </span>
-        <span
-          v-if="marker.representative"
-          class="absolute -top-1 -right-1 grid size-5 place-items-center rounded-full bg-[var(--brand)] text-[10px] text-white"
-          aria-hidden="true"
-        >
-          ★
-        </span>
-      </button>
+        <div class="flex items-start justify-between gap-2">
+          <div class="min-w-0">
+            <p class="truncate text-[13.5px] font-semibold text-[var(--ink)]">
+              <span
+                class="mr-1.5 inline-flex size-[18px] items-center justify-center rounded-full text-[10px] font-bold text-white"
+                :style="{ backgroundColor: railColorOf(selectedBlock.type) }"
+              >{{ selectedIndex + 1 }}</span>
+              {{ selectedBlock.title }}
+            </p>
+            <p class="mt-0.5 text-[11.5px] text-[var(--ink-3)]">
+              {{ selectedBlock.visitDate || '날짜 미정' }} · 미디어 {{ selectedMedia.length }}개
+            </p>
+          </div>
+          <button
+            type="button"
+            class="flex-none rounded-md px-1.5 text-[16px] leading-none text-[var(--ink-3)] hover:text-[var(--ink)]"
+            aria-label="닫기"
+            @click="selectedId = null"
+          >×</button>
+        </div>
+        <div v-if="selectedMedia.length" class="mt-2 flex gap-2 overflow-x-auto pb-0.5">
+          <button
+            v-for="marker in selectedMedia"
+            :key="marker.key"
+            type="button"
+            class="relative grid size-12 flex-none place-items-center overflow-hidden border border-[var(--border)] bg-[var(--bg-subtle)] transition-transform hover:scale-105"
+            :class="markerShapeClass(marker.type)"
+            :aria-label="`${marker.blockTitle} ${mediaLabel(marker.type)} 보기`"
+            @click="openMedia(marker)"
+          >
+            <img
+              v-if="marker.type === 'PHOTO' && marker.media.url"
+              :src="marker.media.url"
+              alt=""
+              class="h-full w-full object-cover"
+            />
+            <span v-else aria-hidden="true">{{ mediaIcon(marker.type) }}</span>
+            <span
+              v-if="marker.representative"
+              class="absolute -top-1 -right-1 grid size-4 place-items-center rounded-full bg-[var(--brand)] text-[9px] text-white"
+              aria-hidden="true"
+            >★</span>
+          </button>
+        </div>
+        <p v-else class="mt-2 text-[12px] text-[var(--ink-3)]">아직 이 장소에 올린 미디어가 없어요.</p>
+      </div>
     </div>
 
-    <p v-if="layout.length" class="mt-2 text-[12px] text-[var(--ink-3)]">
-      위치가 있는 {{ layout.length }}개 장소를 방문 순서대로 잇고, 사진·녹음·영상으로 지도 모양을 채워 보여줘요.
+    <p v-if="pinned.length" class="mt-2 text-[12px] text-[var(--ink-3)]">
+      위치가 있는 {{ pinned.length }}개 장소를 방문 순서대로 잇고, 마커를 누르면 사진·녹음·영상을 볼 수 있어요.
     </p>
 
     <div v-if="mediaMarkers.length" class="mt-3 flex flex-col gap-2">
@@ -366,7 +396,7 @@ function deleteMedia(marker) {
               {{ marker.blockTitle }}
             </span>
             <span class="block text-[11.5px] text-[var(--ink-3)]">
-              {{ mediaLabel(marker.type) }} · {{ marker.point.block.visitDate || '날짜 미정' }}
+              {{ mediaLabel(marker.type) }} · {{ marker.visitDate || '날짜 미정' }}
             </span>
           </span>
           <Star v-if="marker.representative" class="size-3.5 flex-none fill-current text-[var(--brand)]" />
@@ -388,25 +418,3 @@ function deleteMedia(marker) {
     />
   </div>
 </template>
-
-<style scoped>
-.map-media-shape {
-  border-radius: 42% 58% 48% 52% / 34% 38% 62% 66%;
-  clip-path: polygon(
-    8% 32%,
-    16% 15%,
-    35% 9%,
-    50% 14%,
-    63% 7%,
-    81% 18%,
-    91% 36%,
-    86% 55%,
-    95% 72%,
-    75% 90%,
-    55% 84%,
-    36% 94%,
-    17% 82%,
-    6% 62%
-  );
-}
-</style>
