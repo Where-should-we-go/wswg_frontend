@@ -32,18 +32,20 @@ export async function getContentTypes() {
 }
 
 // ── 검색·목록 (S3) ───────────────────────────────────────────
-// params: { sidoCode?, gugunCode?, contentTypeId?(number|number[]), keyword?, page=0, size=12 }
+// params: { sidoCode?, gugunCode?, contentTypeId?(number|number[]), keyword?, hasImage?, page=0, size=12 }
+//  · hasImage=true 면 대표 이미지(firstImage1)가 있는 관광지만 조회·집계(목록·totalElements 동시 적용).
 // 반환: { content: Attraction[], page, size, totalElements }
 export async function searchAttractions(params = {}) {
   if (USE_MOCK) {
     await mockDelay()
-    const { sidoCode, gugunCode, contentTypeId, keyword, page = 0, size = 12 } = params
+    const { sidoCode, gugunCode, contentTypeId, keyword, hasImage, page = 0, size = 12 } = params
     const types = contentTypeId == null ? [] : [].concat(contentTypeId).map(Number)
     let list = db.ATTRACTIONS.filter((a) => {
       if (sidoCode != null && a.sidoCode !== Number(sidoCode)) return false
       if (gugunCode != null && a.gugunCode !== Number(gugunCode)) return false
       if (types.length && !types.includes(a.contentTypeId)) return false
       if (keyword && !a.title.includes(keyword)) return false
+      if (hasImage && !a.firstImage1) return false
       return true
     })
     const totalElements = list.length
