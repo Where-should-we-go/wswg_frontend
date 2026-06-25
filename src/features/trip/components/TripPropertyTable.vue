@@ -3,7 +3,7 @@
 // 노션 데이터베이스 프로퍼티 스타일: 날짜·지역·동행·스타일·예산.
 // 동행은 member pill(AvatarStack 와 같은 --collab-* 색), 지역/스타일은 BlockTag.
 import { computed } from "vue";
-import { Calendar, MapPin, Users, Palette, Wallet } from "@lucide/vue";
+import { Calendar, MapPin, Users, Palette, Wallet, X } from "@lucide/vue";
 import { BlockTag } from "@/components/ui/block-tag";
 import { formatBudget } from "@/features/trip/lib/blockMeta";
 
@@ -13,7 +13,7 @@ const props = defineProps({
   editable: { type: Boolean, default: false },
 });
 
-const emit = defineEmits(["set-dates"]);
+const emit = defineEmits(["set-dates", "remove-companion"]);
 
 function fmt(d) {
   if (!d) return "미정";
@@ -117,7 +117,8 @@ function memberColor(m, i) {
       <span
         v-for="(m, i) in members"
         :key="m.id"
-        class="inline-flex items-center gap-1.5 rounded-full bg-[var(--accent)] py-0.5 pr-2.5 pl-[3px] text-[12.5px] font-medium"
+        class="group/companion inline-flex items-center gap-1.5 rounded-full bg-[var(--accent)] py-0.5 pl-[3px] text-[12.5px] font-medium"
+        :class="editable ? 'pr-1' : 'pr-2.5'"
       >
         <span
           class="grid size-[18px] place-items-center rounded-full text-[10px] font-bold text-white"
@@ -125,6 +126,15 @@ function memberColor(m, i) {
           >{{ m.initial }}</span
         >
         {{ m.name }}
+        <button
+          v-if="editable"
+          type="button"
+          class="ml-0.5 grid size-[18px] place-items-center rounded-full text-[var(--ink-3)] opacity-0 transition group-hover/companion:opacity-100 hover:bg-[var(--card)] hover:text-[var(--destructive)] focus-visible:opacity-100"
+          :aria-label="`${m.name} 동행에서 빼기`"
+          @click.stop="emit('remove-companion', m.id)"
+        >
+          <X class="size-3" />
+        </button>
       </span>
     </div>
 

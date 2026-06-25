@@ -270,6 +270,10 @@ export function useTripEditor(initialTrip) {
       if ('title' in patch) trip.value.title = patch.title
       if ('startDate' in patch) trip.value.start_date = patch.startDate
       if ('endDate' in patch) trip.value.end_date = patch.endDate
+      if ('removedMemberIds' in patch) {
+        const removed = new Set((patch.removedMemberIds ?? []).map(String))
+        trip.value.members = (trip.value.members ?? []).filter((m) => !removed.has(String(m.id)))
+      }
       trip.value.data.meta = { ...trip.value.data.meta, ...patch }
     }
   }
@@ -532,6 +536,18 @@ export function useTripEditor(initialTrip) {
     scheduleSave()
   }
 
+  // 동행자를 이 여행에서만 뺀다(그룹 멤버십은 그대로). data.meta.removedMemberIds 에 누적.
+  function removeCompanion(memberId) {
+    const id = String(memberId)
+    const meta = (trip.value.data.meta ??= {})
+    const next = new Set((meta.removedMemberIds ?? []).map(String))
+    next.add(id)
+    meta.removedMemberIds = [...next]
+    trip.value.members = (trip.value.members ?? []).filter((m) => String(m.id) !== id)
+    scheduleMetaSend({ removedMemberIds: meta.removedMemberIds })
+    scheduleSave()
+  }
+
   return {
     trip,
     items,
@@ -559,6 +575,7 @@ export function useTripEditor(initialTrip) {
     setRepresentative,
     setTitle,
     setDates,
+    removeCompanion,
   }
 }
 

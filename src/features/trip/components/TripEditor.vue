@@ -83,6 +83,12 @@ function onSetDates({ startDate, endDate }) {
   }
 }
 
+// 동행자를 이 여행에서만 뺀다(그룹 멤버십은 유지).
+function onRemoveCompanion(memberId) {
+  ed.removeCompanion(memberId)
+  toast('이 여행의 동행에서 뺐어요')
+}
+
 // 일정 뷰 보조 토글: 'rail' | 'calendar'
 const scheduleMode = ref('rail')
 
@@ -402,6 +408,7 @@ function syncLabel() {
       :trip="ed.trip.value"
       :editable="canDelete"
       @set-dates="onSetDates"
+      @remove-companion="onRemoveCompanion"
     />
 
     <div class="my-[18px] h-px bg-[var(--border)]" />

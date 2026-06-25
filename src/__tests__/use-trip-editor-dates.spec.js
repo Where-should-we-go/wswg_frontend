@@ -69,3 +69,20 @@ describe('useTripEditor.setDates — 기간 변경 시 일자 재배치', () => 
     expect(ed.trip.value.end_date).toBe('2026-07-03')
   })
 })
+
+describe('useTripEditor.removeCompanion — 이 여행에서만 동행 제거', () => {
+  it('동행을 members 에서 빼고 meta.removedMemberIds 에 기록한다(그룹 멤버십은 안 건드림)', () => {
+    const trip = tripWith([], '2026-07-01', '2026-07-02')
+    trip.group_id = 5
+    trip.members = [
+      { id: '1', userId: 1, name: '태호', role: 'OWNER' },
+      { id: '2', userId: 2, name: '의재', role: 'MEMBER' },
+    ]
+    const ed = useTripEditor(trip)
+
+    ed.removeCompanion('2')
+
+    expect(ed.trip.value.members.map((m) => m.id)).toEqual(['1'])
+    expect(ed.trip.value.data.meta.removedMemberIds).toContain('2')
+  })
+})
