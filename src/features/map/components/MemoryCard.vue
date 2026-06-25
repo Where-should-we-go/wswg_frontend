@@ -11,7 +11,7 @@ defineProps({
   active: { type: Boolean, default: false },
 })
 
-const emit = defineEmits(['focus', 'change'])
+const emit = defineEmits(['focus'])
 </script>
 
 <template>
@@ -48,12 +48,5 @@ const emit = defineEmits(['focus', 'change'])
         <span class="truncate">{{ item.caption }}</span>
       </div>
     </div>
-    <button
-      type="button"
-      class="flex-none text-[11.5px] whitespace-nowrap text-[var(--link)] hover:underline"
-      @click.stop="emit('change', item)"
-    >
-      변경
-    </button>
   </article>
 </template>

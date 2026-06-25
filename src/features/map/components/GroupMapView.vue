@@ -26,17 +26,21 @@ const groupId = computed(() => route.params.id)
 const items = ref([])
 const group = ref(null)
 const regionLevel = ref('GUGUN')
-const selectedMediaType = ref(null)
+const selectedMediaType = ref('ALL')
 const status = ref('loading') // loading | ready | empty | error
 const focusedSido = ref(null)
+
+// 'ALL'(전체)이면 mediaType 파라미터를 보내지 않는다.
+const mediaTypeParam = computed(() =>
+  selectedMediaType.value && selectedMediaType.value !== 'ALL'
+    ? { mediaType: selectedMediaType.value }
+    : {},
+)
 
 async function load() {
   status.value = 'loading'
   try {
-    const params = {
-      ...(selectedMediaType.value ? { mediaType: selectedMediaType.value } : {}),
-    }
-    const data = await getGroupMap(groupId.value, params)
+    const data = await getGroupMap(groupId.value, { ...mediaTypeParam.value })
     items.value = Array.isArray(data) ? data : []
     status.value = items.value.length ? 'ready' : 'empty'
   } catch {
@@ -52,6 +56,7 @@ watch(groupId, async (id) => {
 watch(selectedMediaType, load)
 
 const mediaTypeOptions = [
+  { value: 'ALL', label: '전체' },
   { value: 'PHOTO', label: '사진' },
   { value: 'AUDIO', label: '녹음' },
   { value: 'VIDEO', label: '영상' },
@@ -111,7 +116,7 @@ const regionStats = computed(() => {
 
 const totalMediaCount = computed(() => items.value.length)
 const title = computed(() => group.value?.groupName ? `${group.value.groupName} 발자취` : '모임 발자취')
-const hasFilter = computed(() => !!selectedMediaType.value)
+const hasFilter = computed(() => !!selectedMediaType.value && selectedMediaType.value !== 'ALL')
 const emptyTitle = computed(() => hasFilter.value ? '이 조건에 맞는 발자취가 없어요' : '아직 함께 다녀온 곳이 없어요')
 const emptyDescription = computed(() =>
   hasFilter.value ? '필터를 바꾸거나 여행 기록에 미디어를 더해보세요.' : '여행을 다녀오면 여기에 발자취가 쌓여요.',
@@ -128,7 +133,7 @@ function regionLabelOf(item) {
 }
 
 function resetFilters() {
-  selectedMediaType.value = null
+  selectedMediaType.value = 'ALL'
   focusedSido.value = null
 }
 
@@ -163,7 +168,7 @@ async function openGallery({ sidoCode, gugunCode = null, regionLabel = '', prelo
     const data = await getGroupMap(groupId.value, {
       sidoCode,
       ...(gugunCode != null ? { gugunCode } : {}),
-      ...(selectedMediaType.value ? { mediaType: selectedMediaType.value } : {}),
+      ...mediaTypeParam.value,
     })
     gallery.value.items = Array.isArray(data) ? data : []
   } catch {
@@ -283,8 +288,7 @@ function galleryPayloadFor(item) {
           :key="`${m.groupLevel}-${m.id}`"
           :item="m"
           :active="focusedSido === m.sidoCode"
-          @focus="focusRegion"
-          @change="openGalleryFromCard"
+          @focus="openGalleryFromCard"
         />
       </div>
     </aside>
@@ -305,7 +309,7 @@ function galleryPayloadFor(item) {
           :key="`mobile-${m.groupLevel}-${m.id}`"
           type="button"
           class="w-[130px] flex-none snap-start text-left"
-          @click="focusRegion(m)"
+          @click="openGalleryFromCard(m)"
         >
           <img
             v-if="m.photo || m.mediaUrl"

@@ -2,12 +2,13 @@
 // RegionGallerySheet — 권역/핀 클릭 시 E4 지역 미디어 갤러리. 모바일은 풀스크린
 // 바텀시트, 데스크탑은 우측 시트로 표현. 지역별 여행 기록 미디어를 감상한다.
 // 카피는 해요체.
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import EmptyState from '@/components/common/EmptyState.vue'
 import { MEDIA_BADGE } from '@/features/map/data/koreaSido'
+import MediaLightbox from '@/features/trip/components/MediaLightbox.vue'
 
 const props = defineProps({
   open: { type: Boolean, default: false },
@@ -21,6 +22,13 @@ const props = defineProps({
 const emit = defineEmits(['update:open', 'curate', 'remove'])
 
 const title = computed(() => props.regionLabel || '이 지역')
+
+// 미디어 클릭 → 라이트박스(사진 확대 / 영상·녹음 인라인 재생).
+const selectedMedia = ref(null)
+function openMedia(m) {
+  if (!m.mediaUrl) return
+  selectedMedia.value = { type: m.mediaType, url: m.mediaUrl, ...m }
+}
 </script>
 
 <template>
@@ -51,7 +59,10 @@ const title = computed(() => props.regionLabel || '이 지역')
         <figure
           v-for="m in items"
           :key="m.id"
-          class="overflow-hidden rounded-[var(--radius)] border border-[var(--border)]"
+          class="cursor-pointer overflow-hidden rounded-[var(--radius)] border border-[var(--border)] transition hover:border-[var(--brand)]"
+          role="button"
+          :aria-label="`${MEDIA_BADGE[m.mediaType]?.label || '미디어'} 보기`"
+          @click="openMedia(m)"
         >
           <div class="relative aspect-square">
             <img
@@ -90,4 +101,11 @@ const title = computed(() => props.regionLabel || '이 지역')
       </div>
     </SheetContent>
   </Sheet>
+
+  <!-- 미디어 확대/재생 라이트박스 -->
+  <MediaLightbox
+    :media="selectedMedia"
+    :caption="selectedMedia?.caption ?? ''"
+    @close="selectedMedia = null"
+  />
 </template>
