@@ -102,8 +102,12 @@ const gugunOptions = computed(() =>
 )
 const groupOptions = computed(() => [
   { value: undefined, label: '개인 여행 (모임 없이)' },
-  ...groups.value.map((g) => ({ value: g.groupId, label: `${g.emoji} ${g.groupName}` })),
+  ...groups.value.map((g) => ({ value: g.groupId, label: groupOptionLabel(g) })),
 ])
+
+function groupOptionLabel(group) {
+  return [group?.emoji, group?.groupName].filter(Boolean).join(' ') || '이름 없는 모임'
+}
 
 onMounted(async () => {
   const [s, g] = await Promise.all([getSidos(), getGroups()])
