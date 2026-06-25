@@ -19,7 +19,6 @@ import {
   recommendTrip,
   recommendRestaurants,
   buildItinerary,
-  insertMoveBlocks,
   createTripFromItinerary,
   RESTAURANT_CONTENT_TYPE_ID,
 } from '@/services/aiTrip'
@@ -58,12 +57,6 @@ const endDate = ref('')
 const DEFAULT_HEADCOUNT = 1
 const headcount = ref(DEFAULT_HEADCOUNT)
 const styles = ref([])
-// 이동수단: 자동차(네이버) | 대중교통(ODsay). 일정 생성 시 구간 이동시간 계산에 쓴다.
-const travelMode = ref('CAR')
-const TRAVEL_MODES = [
-  { value: 'CAR', label: '자동차', emoji: '🚗' },
-  { value: 'TRANSIT', label: '대중교통', emoji: '🚌' },
-]
 const groupId = ref(undefined)
 const NOTE_MAX = 500
 // 사용자가 직접 적는 자유 서술(원하는 여행). 선택 입력 — 생성 가능 조건엔 넣지 않는다.
@@ -268,14 +261,13 @@ async function createPlan() {
       startDate: startDate.value,
       endDate: endDate.value,
     })
-    // 같은 날 연속 장소 사이에 이동 블록(거리/시간)을 끼워넣는다.
-    const itemsWithMoves = await insertMoveBlocks(items, travelMode.value)
+    // 이동 블록은 자동으로 넣지 않는다(사용자가 직접 추가할 때만). 거리순 배치는 buildItinerary가 처리.
     const trip = await createTripFromItinerary({
       title: defaultTitle.value,
       startDate: startDate.value,
       endDate: endDate.value,
       groupId: groupId.value,
-      items: itemsWithMoves,
+      items,
       region: regionLabel.value || undefined, // 패널 '지역'에 반영(문자열 라벨)
       styles: styles.value, // 패널 '스타일'에 반영
     })
@@ -411,28 +403,6 @@ function cancel() {
         <section>
           <h2 class="mb-2 text-sm font-semibold text-[var(--ink)]">어떤 여행을 원해요?</h2>
           <StyleChipGroup v-model="styles" :options="STYLE_OPTIONS" />
-        </section>
-
-        <!-- 이동수단: 일정에 구간 이동시간을 자동으로 넣어준다 -->
-        <section>
-          <h2 class="mb-2 text-sm font-semibold text-[var(--ink)]">이동수단</h2>
-          <div class="inline-flex rounded-[var(--radius)] border border-[var(--border)] p-0.5">
-            <button
-              v-for="m in TRAVEL_MODES"
-              :key="m.value"
-              type="button"
-              class="flex h-9 items-center gap-1.5 rounded-[calc(var(--radius)-2px)] px-4 text-sm font-medium transition-colors"
-              :class="
-                travelMode === m.value
-                  ? 'bg-[var(--primary)] text-white'
-                  : 'text-[var(--ink-2)] hover:bg-[var(--hover)]'
-              "
-              :aria-pressed="travelMode === m.value"
-              @click="travelMode = m.value"
-            >
-              <span aria-hidden="true">{{ m.emoji }}</span>{{ m.label }}
-            </button>
-          </div>
         </section>
 
         <!-- 자유 서술: 원하는 여행을 직접 작성 (선택) -->

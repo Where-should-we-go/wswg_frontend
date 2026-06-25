@@ -155,8 +155,32 @@ const DAY_PLAN = [
 export const ATTRACTIONS_PER_DAY = DAY_PLAN.filter((s) => s.kind === '관광').length // 3
 export const RESTAURANTS_PER_DAY = DAY_PLAN.filter((s) => s.kind === '식당').length // 2
 
+// 좌표가 있는 항목을 최근접 이웃(nearest-neighbor) 순으로 정렬한다.
+// 첫 항목에서 출발해 가장 가까운 곳을 차례로 잇는다(이동 동선이 자연스러워짐).
+// 좌표 없는 항목은 순서 유지로 뒤에 붙인다. (정렬 비교는 위경도 제곱거리로 충분)
+function nearestNeighborOrder(list) {
+  const hasCoord = (x) => x?.latitude != null && x?.longitude != null
+  const withCoord = list.filter(hasCoord)
+  const noCoord = list.filter((x) => !hasCoord(x))
+  if (withCoord.length <= 2) return [...withCoord, ...noCoord]
+
+  const dist2 = (a, b) => (a.latitude - b.latitude) ** 2 + (a.longitude - b.longitude) ** 2
+  const remaining = withCoord.slice()
+  const ordered = [remaining.shift()]
+  while (remaining.length) {
+    const last = ordered[ordered.length - 1]
+    let best = 0
+    for (let i = 1; i < remaining.length; i++) {
+      if (dist2(last, remaining[i]) < dist2(last, remaining[best])) best = i
+    }
+    ordered.push(remaining.splice(best, 1)[0])
+  }
+  return [...ordered, ...noCoord]
+}
+
 // 선택 관광지 + 식당으로 일자별 일정을 조립한다(DAY_PLAN 시간표대로).
-// 관광지는 일자 수만큼 라운드로빈 분배. 하루 슬롯(관광 3)을 넘는 관광지는 시간 없이 뒤에 붙인다.
+// 관광지는 일자 수만큼 라운드로빈 분배하고, 하루 안에서는 거리상 가까운 순으로 배치한다.
+// 하루 슬롯(관광 3)을 넘는 관광지는 시간 없이 뒤에 붙인다.
 export function buildItinerary({ attractions = [], restaurants = [], startDate, endDate }) {
   const days = dayList(startDate, endDate)
   if (days.length === 0) return []
@@ -167,7 +191,7 @@ export function buildItinerary({ attractions = [], restaurants = [], startDate, 
   const items = []
   let seq = 0
   days.forEach((date, di) => {
-    const dayAttr = attrBuckets[di].slice()
+    const dayAttr = nearestNeighborOrder(attrBuckets[di])
     const dayRest = restaurants.slice(di * RESTAURANTS_PER_DAY, (di + 1) * RESTAURANTS_PER_DAY)
     let ri = 0
     const seqForDay = []
