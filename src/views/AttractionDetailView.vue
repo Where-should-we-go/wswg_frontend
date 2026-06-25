@@ -23,6 +23,7 @@ import { getAttraction, getContentTypes } from '@/services/attractions'
 import { getMyTrips } from '@/services/mypage'
 import { getTrip, updateTrip } from '@/services/trips'
 import { isAuthenticated } from '@/services/auth'
+import { buildPlaceBlock, placeRegionLabel } from '@/features/trip/lib/placeBlock'
 
 const route = useRoute()
 const router = useRouter()
@@ -65,9 +66,7 @@ const categoryLabel = computed(() => {
 })
 
 const regionLabel = computed(() => {
-  const a = attraction.value
-  if (!a) return ''
-  return [a.sidoName, a.gugunName].filter(Boolean).join(' ')
+  return placeRegionLabel(attraction.value)
 })
 
 const fullAddress = computed(() => {
@@ -157,20 +156,7 @@ async function addToTrip(tripCard) {
   try {
     const trip = await getTrip(tripCard.tripId)
     const items = trip.data?.items ?? []
-    const block = {
-      id: `b-${Date.now()}`,
-      content_id: a.contentId,
-      title: a.title,
-      type: '관광',
-      lat: a.mapY ?? null,
-      lng: a.mapX ?? null,
-      visitDate: null,
-      time: null,
-      durationMin: null,
-      order: items.length + 1,
-      media: [],
-      properties: { region: regionLabel.value },
-    }
+    const block = buildPlaceBlock(a, { order: items.length + 1 })
     const nextData = { ...trip.data, items: [...items, block] }
     await updateTrip(tripCard.tripId, {
       title: trip.title,
