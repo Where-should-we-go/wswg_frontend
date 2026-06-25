@@ -4,6 +4,7 @@
 // 자체 헤더에서 그린다 — 셸 토픽바는 어느 화면에서나 맞는 정보만 둔다.
 import { computed } from 'vue'
 import { useRoute } from 'vue-router'
+import UserMenu from '@/features/auth/UserMenu.vue'
 
 const route = useRoute()
 
@@ -24,6 +25,9 @@ const crumb = computed(() => LABELS[route.name] ?? '')
   <header class="flex h-11 items-center gap-2.5 border-b border-[var(--border)] px-[18px]">
     <div class="text-[13px] text-[var(--ink-2)]">
       <b class="font-semibold text-[var(--ink)]">{{ crumb }}</b>
+    </div>
+    <div class="ml-auto">
+      <UserMenu />
     </div>
   </header>
 </template>
