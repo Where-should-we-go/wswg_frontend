@@ -35,8 +35,8 @@ import { setTripTitleOverride } from '@/stores/tripUiState'
 
 const props = defineProps({
   trip: { type: Object, required: true },
-  // 소유자 여부(삭제 노출). user_id === 현재 사용자.
-  isOwner: { type: Boolean, default: false },
+  // 삭제 노출 여부. 개인 여행=본인, 그룹 여행=그룹 소유자.
+  canDelete: { type: Boolean, default: false },
 })
 
 const emit = defineEmits(['delete'])
@@ -501,7 +501,7 @@ function syncLabel() {
     </TripViewTabs>
 
     <!-- 소유자: 여행 삭제 -->
-    <div v-if="isOwner && !ed.isEmpty.value" class="mt-12 border-t border-[var(--border)] pt-6">
+    <div v-if="canDelete && !ed.isEmpty.value" class="mt-12 border-t border-[var(--border)] pt-6">
       <Button variant="ghost" class="text-[var(--danger)]" @click="confirmDeleteOpen = true">
         여행 삭제하기
       </Button>

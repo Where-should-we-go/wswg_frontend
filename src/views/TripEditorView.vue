@@ -20,9 +20,15 @@ const loading = ref(true)
 const errorStatus = ref(null) // 404 | 403 | null
 const currentUserId = ref(null)
 
-const isOwner = computed(
-  () => !!trip.value && !!currentUserId.value && trip.value.user_id === currentUserId.value,
-)
+// 삭제 권한: 개인 여행은 본인, 그룹 여행은 그룹 소유자(백엔드 validateWritable과 일치).
+const canDelete = computed(() => {
+  const t = trip.value
+  const uid = currentUserId.value
+  if (!t || !uid) return false
+  if (t.user_id != null) return t.user_id === uid
+  const owner = (t.members ?? []).find((m) => m.role === 'OWNER')
+  return owner != null && owner.userId === uid
+})
 
 async function load(id) {
   loading.value = true
@@ -87,5 +93,5 @@ async function onDelete() {
   </EmptyState>
 
   <!-- 정상 -->
-  <TripEditor v-else-if="trip" :trip="trip" :is-owner="isOwner" @delete="onDelete" />
+  <TripEditor v-else-if="trip" :trip="trip" :can-delete="canDelete" @delete="onDelete" />
 </template>
