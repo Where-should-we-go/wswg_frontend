@@ -3,7 +3,7 @@
 // 구조(B안): nav(검색/모임) → 현재 모임 드롭다운(전체 포함) → 내 여행/참여 중 → 새 여행/모임.
 // 모임 드롭다운으로 보고 있는 모임을 바꾸면 아래 내 여행/참여 중이 그 모임 것만 보인다('전체'면 모두).
 // 데이터는 서비스 레이어(mock↔실제 자동 전환)에서 로드 — 화면 본문과 정합.
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { RouterLink, useRoute } from 'vue-router'
 import { Search, Users, Plus, ChevronDown } from '@lucide/vue'
 import { NavItem } from '@/components/ui/nav-item'
@@ -69,6 +69,10 @@ async function loadSidebar() {
 onMounted(loadSidebar)
 // 다른 화면에서 여행/모임을 만들고 돌아오면 트리도 최신으로(가벼운 갱신).
 watch(() => route.name, loadSidebar)
+
+// 모임 생성/이름변경/삭제 등으로 목록이 바뀌면(같은 화면 내에서도) 사이드바를 갱신한다.
+onMounted(() => window.addEventListener('wswg:groups-changed', loadSidebar))
+onUnmounted(() => window.removeEventListener('wswg:groups-changed', loadSidebar))
 
 // 선택 모임으로 여행 필터.
 // TODO(backend): 실데이터엔 트립 groupId가 없어 '전체'가 아니면 필터 결과가 비게 된다(mock 에서만 동작).

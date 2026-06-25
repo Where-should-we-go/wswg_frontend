@@ -73,6 +73,10 @@ export function apiPut(path, body) {
   return sendJson('PUT', path, body)
 }
 
+export function apiPatch(path, body) {
+  return sendJson('PATCH', path, body)
+}
+
 export async function apiDelete(path) {
   const res = await authFetch(path, { method: 'DELETE' })
 

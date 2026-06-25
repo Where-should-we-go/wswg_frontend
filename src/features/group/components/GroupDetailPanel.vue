@@ -1,19 +1,23 @@
 <script setup>
 // 모임 상세 패널 — 헤더 + 액션바 + 가입 요청 + 멤버 목록 + "이 모임의 여행" 바로가기.
 // group: getGroup 응답 { groupId, groupName, emoji, tripCount, members[], memberCount }
-import { Link2, UserPlus, Map, Plus, ArrowRight, Check } from '@lucide/vue'
+import { ref, nextTick } from 'vue'
+import { Link2, UserPlus, Map, Plus, ArrowRight, Check, Pencil, X, Trash2 } from '@lucide/vue'
 import { Button } from '@/components/ui/button'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Separator } from '@/components/ui/separator'
 import { Skeleton } from '@/components/ui/skeleton'
 import MemberList from './MemberList.vue'
 
-defineProps({
+const props = defineProps({
   group: { type: Object, default: null },
   loading: { type: Boolean, default: false },
   removingId: { type: [String, Number], default: null },
   joinRequests: { type: Array, default: () => [] },
   approvingId: { type: [String, Number], default: null },
+  // 모임장일 때만 이름 변경 UI 노출.
+  isOwner: { type: Boolean, default: false },
+  renaming: { type: Boolean, default: false },
 })
 
 const emit = defineEmits([
@@ -21,12 +25,39 @@ const emit = defineEmits([
   'add-member',
   'approve-request',
   'remove-member',
+  'rename',
+  'delete-group',
   'go-new-plan',
   'go-map',
 ])
 
 function initialOf(request) {
   return (request.name || request.email || '?').slice(0, 1)
+}
+
+// 모임 이름 인라인 편집.
+const editing = ref(false)
+const draft = ref('')
+const inputEl = ref(null)
+
+function startEdit() {
+  draft.value = props.group?.groupName ?? ''
+  editing.value = true
+  nextTick(() => inputEl.value?.focus())
+}
+
+function cancelEdit() {
+  editing.value = false
+}
+
+function saveEdit() {
+  const name = draft.value.trim()
+  if (!name || name === props.group?.groupName) {
+    editing.value = false
+    return
+  }
+  emit('rename', name)
+  editing.value = false
 }
 </script>
 
@@ -53,10 +84,55 @@ function initialOf(request) {
         >
           {{ group.emoji || '✨' }}
         </div>
-        <div class="flex min-w-0 flex-col">
-          <h2 class="truncate text-[20px] font-extrabold tracking-tight text-[var(--ink)]">
-            {{ group.groupName }}
-          </h2>
+        <div class="flex min-w-0 flex-1 flex-col">
+          <!-- 보기 모드: 이름 + (모임장) 연필 버튼 -->
+          <div v-if="!editing" class="flex min-w-0 items-center gap-1">
+            <h2 class="truncate text-[20px] font-extrabold tracking-tight text-[var(--ink)]">
+              {{ group.groupName }}
+            </h2>
+            <Button
+              v-if="isOwner"
+              variant="ghost"
+              size="icon-sm"
+              class="shrink-0 text-[var(--ink-3)] hover:text-[var(--ink)]"
+              aria-label="모임 이름 변경"
+              @click="startEdit"
+            >
+              <Pencil class="size-3.5" />
+            </Button>
+          </div>
+          <!-- 편집 모드: 입력 + 저장/취소 -->
+          <div v-else class="flex items-center gap-1">
+            <input
+              ref="inputEl"
+              v-model="draft"
+              type="text"
+              maxlength="20"
+              :disabled="renaming"
+              class="min-w-0 flex-1 rounded-[var(--radius)] border border-[var(--border)] bg-[var(--bg-subtle)] px-2 py-1 text-[18px] font-extrabold tracking-tight text-[var(--ink)] outline-none focus:border-[var(--primary)]"
+              @keydown.enter.prevent="saveEdit"
+              @keydown.esc.prevent="cancelEdit"
+            />
+            <Button
+              size="icon-sm"
+              class="shrink-0"
+              aria-label="저장"
+              :disabled="renaming"
+              @click="saveEdit"
+            >
+              <Check class="size-3.5" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              class="shrink-0"
+              aria-label="취소"
+              :disabled="renaming"
+              @click="cancelEdit"
+            >
+              <X class="size-3.5" />
+            </Button>
+          </div>
           <p class="text-[13px] text-[var(--ink-3)]">
             멤버 {{ group.memberCount ?? group.members?.length ?? 0 }}명 · 여행
             {{ group.tripCount ?? 0 }}개
@@ -158,6 +234,22 @@ function initialOf(request) {
             <ArrowRight class="size-4 text-[var(--ink-3)]" />
           </button>
         </div>
+
+        <!-- 위험 구역: 모임 삭제 (모임장만) -->
+        <template v-if="isOwner">
+          <Separator class="my-2" />
+          <div class="px-2 pb-6">
+            <Button
+              variant="ghost"
+              size="sm"
+              class="text-[var(--danger)] hover:bg-[var(--danger)]/10 hover:text-[var(--danger)]"
+              @click="emit('delete-group')"
+            >
+              <Trash2 class="size-4" />
+              모임 삭제
+            </Button>
+          </div>
+        </template>
       </div>
     </template>
   </section>
