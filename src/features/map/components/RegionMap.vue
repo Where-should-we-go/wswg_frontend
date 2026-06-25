@@ -1,9 +1,31 @@
 <script setup>
-// RegionMap — 발자취 지도(S8) 본문. 단순 그리드 대신 시도별 SVG path로
-// 대한민국 윤곽을 그리고, 방문 권역에는 대표 미디어를 얹는다.
-// 색만으로 상태 전달 금지 → 핀 이모지·라벨 병행(§3.6). 클릭 시 상위로 위임.
-import { computed } from 'vue'
-import { SIDO_CELLS, SIDO_CENTER, MEDIA_BADGE, TOTAL_SIDO } from '@/features/map/data/koreaSido'
+// RegionMap — 발자취 지도(S8) 본문.
+// 전국을 시군구 경계로 그리고, 미디어가 있는 시군구만 사진/타입 배지로 채운다.
+import { computed, onMounted, ref } from 'vue'
+import { MEDIA_BADGE } from '@/features/map/data/koreaSido'
+
+const MUNICIPALITY_GEOJSON_URL =
+  'https://raw.githubusercontent.com/southkorea/southkorea-maps/master/kostat/2018/json/skorea-municipalities-2018-geo.json'
+
+const KOSTAT_PREFIX_TO_SIDO_CODE = {
+  11: 1,
+  21: 6,
+  22: 4,
+  23: 2,
+  24: 5,
+  25: 3,
+  26: 7,
+  29: 8,
+  31: 31,
+  32: 32,
+  33: 33,
+  34: 34,
+  35: 37,
+  36: 38,
+  37: 35,
+  38: 36,
+  39: 39,
+}
 
 const props = defineProps({
   // getGroupMap 응답: [{ id, sidoCode, gugunCode, mediaType, regionLabel, caption, ... }]
@@ -11,156 +33,366 @@ const props = defineProps({
   focusedSido: { type: Number, default: null },
 })
 
-const emit = defineEmits(['select-region', 'select-pin'])
+const emit = defineEmits(['select-gugun', 'select-pin'])
 
-// 방문 시도 코드 집합.
-const visited = computed(() => new Set(props.items.map((m) => m.sidoCode)))
+const mapStatus = ref('loading')
+const rawFeatures = ref([])
 
-// 시도별 대표 추억 1개(핀). 같은 시도 여러 건이면 첫 건을 대표 핀으로.
-const pinBySido = computed(() => {
+onMounted(loadMunicipalities)
+
+async function loadMunicipalities() {
+  mapStatus.value = 'loading'
+  try {
+    const response = await fetch(MUNICIPALITY_GEOJSON_URL)
+    if (!response.ok) throw new Error(`HTTP ${response.status}`)
+    const geojson = await response.json()
+    rawFeatures.value = Array.isArray(geojson.features) ? geojson.features : []
+    mapStatus.value = rawFeatures.value.length ? 'ready' : 'error'
+  } catch {
+    mapStatus.value = 'error'
+  }
+}
+
+const projection = computed(() => {
+  const points = []
+  for (const feature of rawFeatures.value) {
+    collectLonLat(feature.geometry?.coordinates, points)
+  }
+
+  if (!points.length) {
+    return {
+      project: ([lon, lat]) => [lon, lat],
+    }
+  }
+
+  const geoBounds = boundsOf(points)
+  const minLon = geoBounds.minX
+  const maxLon = geoBounds.maxX
+  const minLat = geoBounds.minY
+  const maxLat = geoBounds.maxY
+  const width = maxLon - minLon || 1
+  const height = maxLat - minLat || 1
+  const scale = Math.min(96 / width, 132 / height)
+  const drawnWidth = width * scale
+  const drawnHeight = height * scale
+  const offsetX = (100 - drawnWidth) / 2
+  const offsetY = (140 - drawnHeight) / 2
+
+  return {
+    project: ([lon, lat]) => [
+      offsetX + (lon - minLon) * scale,
+      offsetY + (maxLat - lat) * scale,
+    ],
+  }
+})
+
+const mediaByGugun = computed(() => {
   const map = new Map()
-  for (const m of props.items) {
-    if (!map.has(m.sidoCode)) map.set(m.sidoCode, m)
+  for (const item of props.items) {
+    const key = mediaKey(item.sidoCode, item.gugunName)
+    const list = map.get(key) ?? []
+    list.push(item)
+    map.set(key, list)
   }
   return map
 })
 
-const pins = computed(() =>
-  [...pinBySido.value.values()]
-    .map((m) => ({ item: m, center: SIDO_CENTER[m.sidoCode] }))
-    .filter((p) => p.center),
+const cells = computed(() =>
+  rawFeatures.value
+    .map((feature) => toCell(feature))
+    .filter(Boolean)
+    .sort((a, b) => a.name.localeCompare(b.name, 'ko')),
 )
 
-const visitedCount = computed(() => visited.value.size)
+const visibleCells = computed(() =>
+  props.focusedSido == null
+    ? cells.value
+    : cells.value.filter((cell) => cell.sidoCode === props.focusedSido),
+)
+
+const visitedCount = computed(() => cells.value.filter((cell) => cell.media.length > 0).length)
+const totalCount = computed(() => cells.value.length)
+const focusedSidoName = computed(() =>
+  props.focusedSido == null ? '' : (visibleCells.value[0]?.sidoName ?? ''),
+)
+
+function toCell(feature) {
+  const code = String(feature.properties?.code ?? '')
+  const name = feature.properties?.name ?? ''
+  const sidoCode = KOSTAT_PREFIX_TO_SIDO_CODE[code.slice(0, 2)]
+  if (!sidoCode || !name || !feature.geometry) return null
+
+  const path = geometryToPath(feature.geometry)
+  if (!path) return null
+
+  const points = []
+  collectLonLat(feature.geometry.coordinates, points)
+  const projected = points.map((point) => projection.value.project(point))
+  const projectedBounds = boundsOf(projected)
+  const bounds = {
+    x: projectedBounds.minX,
+    y: projectedBounds.minY,
+    w: projectedBounds.maxX - projectedBounds.minX,
+    h: projectedBounds.maxY - projectedBounds.minY,
+  }
+  const center = polygonCenter(projected, bounds)
+  const media = mediaByGugun.value.get(mediaKey(sidoCode, name)) ?? []
+  const photo = media.find((item) => item.mediaType === 'PHOTO' && item.mediaUrl)
+  const representative = photo ?? media[0] ?? null
+
+  return {
+    id: code,
+    code,
+    sidoCode,
+    sidoName: sidoNameOf(sidoCode),
+    gugunCode: representative?.gugunCode ?? null,
+    name,
+    label: [sidoNameOf(sidoCode), name].filter(Boolean).join(' '),
+    path,
+    bounds,
+    center,
+    media,
+    representative,
+  }
+}
+
+function geometryToPath(geometry) {
+  const polygons =
+    geometry.type === 'Polygon'
+      ? [geometry.coordinates]
+      : geometry.type === 'MultiPolygon'
+        ? geometry.coordinates
+        : []
+
+  return polygons
+    .map((polygon) =>
+      polygon
+        .map((ring) => {
+          const points = ring.map((point) => projection.value.project(point))
+          if (!points.length) return ''
+          return `M${points.map(([x, y]) => `${round(x)} ${round(y)}`).join('L')}Z`
+        })
+        .join(''),
+    )
+    .join('')
+}
+
+function collectLonLat(value, out) {
+  if (!Array.isArray(value)) return
+  if (typeof value[0] === 'number' && typeof value[1] === 'number') {
+    out.push(value)
+    return
+  }
+  for (const child of value) collectLonLat(child, out)
+}
+
+function boundsOf(points) {
+  let minX = Infinity
+  let maxX = -Infinity
+  let minY = Infinity
+  let maxY = -Infinity
+  for (const [x, y] of points) {
+    if (x < minX) minX = x
+    if (x > maxX) maxX = x
+    if (y < minY) minY = y
+    if (y > maxY) maxY = y
+  }
+  return { minX, maxX, minY, maxY }
+}
+
+function polygonCenter(points, bounds) {
+  if (!points.length) return { x: bounds.x + bounds.w / 2, y: bounds.y + bounds.h / 2 }
+  const sample = points.filter((_, index) => index % 8 === 0)
+  const source = sample.length ? sample : points
+  return {
+    x: source.reduce((sum, point) => sum + point[0], 0) / source.length,
+    y: source.reduce((sum, point) => sum + point[1], 0) / source.length,
+  }
+}
+
+function mediaKey(sidoCode, gugunName) {
+  return `${Number(sidoCode)}:${normalizeRegionName(gugunName)}`
+}
+
+function normalizeRegionName(name) {
+  return String(name ?? '').replace(/\s+/g, '').replace(/[·.]/g, '')
+}
+
+function clipId(cell) {
+  return `gugun-media-${cell.id}`
+}
 
 function cellClass(cell) {
-  const isVisited = visited.value.has(cell.sidoCode)
-  const isFocused = props.focusedSido === cell.sidoCode
-  const hasThumbnail = !!thumbnailFor(cell)
-  return [
-    'cursor-pointer transition-colors',
-    hasThumbnail
-      ? ''
-      : isVisited
-        ? 'fill-[var(--brand-soft)] hover:fill-[var(--selected-bg)]'
-        : 'fill-[var(--bg-subtle)]',
-    isFocused ? 'stroke-[var(--brand-ink)]' : isVisited ? 'stroke-[var(--brand)]' : 'stroke-[var(--border)]',
-  ]
+  if (cell.media.length) {
+    return 'fill-[var(--brand-soft)] stroke-[var(--brand-ink)] hover:stroke-[var(--brand-ink)]'
+  }
+  return 'fill-[var(--bg-subtle)] stroke-[color-mix(in_srgb,var(--ink-3)_70%,var(--border))] hover:fill-[var(--hover)] hover:stroke-[var(--ink-2)]'
+}
+
+function cellOpacity(cell) {
+  if (props.focusedSido == null || props.focusedSido === cell.sidoCode) return 1
+  return 0.2
+}
+
+function mediaImageBox(cell) {
+  return {
+    x: cell.bounds.x,
+    y: cell.bounds.y,
+    w: Math.max(cell.bounds.w, 0.8),
+    h: Math.max(cell.bounds.h, 0.8),
+  }
+}
+
+function badgeRadius(cell) {
+  return Math.max(0.75, Math.min(1.8, Math.min(cell.bounds.w, cell.bounds.h) * 0.22))
+}
+
+function shouldShowLabel(cell) {
+  return cell.media.length > 0
 }
 
 function onCell(cell) {
-  if (!visited.value.has(cell.sidoCode)) return
-  emit('select-region', cell.sidoCode)
+  emit('select-gugun', {
+    sidoCode: cell.sidoCode,
+    gugunCode: cell.gugunCode,
+    regionLabel: cell.label,
+    preloadedItems: cell.media,
+  })
 }
 
-function patternId(sidoCode) {
-  return `footprint-media-${sidoCode}`
+function round(value) {
+  return Number(value).toFixed(2).replace(/\.?0+$/, '')
 }
 
-function thumbnailFor(cell) {
-  const item = pinBySido.value.get(cell.sidoCode)
-  return item?.mediaType === 'PHOTO' && item.mediaUrl ? item.mediaUrl : ''
+function sidoNameOf(sidoCode) {
+  return (
+    {
+      1: '서울',
+      2: '인천',
+      3: '대전',
+      4: '대구',
+      5: '광주',
+      6: '부산',
+      7: '울산',
+      8: '세종',
+      31: '경기',
+      32: '강원',
+      33: '충북',
+      34: '충남',
+      35: '경북',
+      36: '경남',
+      37: '전북',
+      38: '전남',
+      39: '제주',
+    }[sidoCode] ?? ''
+  )
 }
 </script>
 
 <template>
   <div class="relative h-full min-h-[420px] overflow-hidden bg-[var(--bg-subtle)]">
-    <!-- 좌상단 요약 -->
     <div
-      class="absolute top-3.5 left-3.5 z-[2] rounded-[var(--radius)] border border-[var(--border)] bg-[color-mix(in_srgb,var(--card)_92%,transparent)] px-3 py-2 text-[13px] text-[var(--ink-2)]"
+      class="absolute top-3.5 left-3.5 z-[2] rounded-[var(--radius)] border border-[var(--border)] bg-[color-mix(in_srgb,var(--card)_94%,transparent)] px-3 py-2 text-[13px] text-[var(--ink-2)]"
     >
-      전국 {{ TOTAL_SIDO }}곳 중
-      <b class="text-[var(--brand-ink)]">{{ visitedCount }}곳</b>, 같이 다녀왔어요 🧭
+      <template v-if="mapStatus === 'ready'">
+        <b class="text-[var(--brand-ink)]">{{ focusedSidoName || '전국' }}</b>
+        시군구 {{ totalCount }}곳 중
+        <b class="text-[var(--brand-ink)]">{{ visitedCount }}곳</b>에 기록이 있어요
+      </template>
+      <template v-else-if="mapStatus === 'loading'">시군구 지도를 불러오고 있어요…</template>
+      <template v-else>시군구 지도를 불러오지 못했어요</template>
     </div>
 
-    <!-- 범례 -->
     <div
-      class="absolute bottom-3.5 left-3.5 z-[2] flex gap-3.5 rounded-[var(--radius)] border border-[var(--border)] bg-[color-mix(in_srgb,var(--card)_92%,transparent)] px-3 py-2 text-[11.5px] text-[var(--ink-2)]"
+      class="absolute bottom-3.5 left-3.5 z-[2] flex gap-3 rounded-[var(--radius)] border border-[var(--border)] bg-[color-mix(in_srgb,var(--card)_94%,transparent)] px-3 py-2 text-[11.5px] text-[var(--ink-2)]"
     >
       <span class="flex items-center gap-1.5">
-        <i class="inline-block size-2.5 rounded-sm border border-[var(--brand)] bg-[var(--brand-soft)]" />다녀온 곳
+        <i class="inline-block size-2.5 rounded-sm border border-[var(--brand)] bg-[var(--brand-soft)]" />기록 있음
       </span>
       <span class="flex items-center gap-1.5">
-        <i class="inline-block size-2.5 rounded-sm border border-[var(--border)] bg-[var(--bg-subtle)]" />아직
+        <i class="inline-block size-2.5 rounded-sm border border-[var(--border)] bg-[var(--bg-subtle)]" />기록 없음
       </span>
     </div>
 
-    <!-- 지도 SVG -->
-    <svg viewBox="0 24 82 116" class="block h-full w-full" role="img" aria-label="발자취 지도">
+    <svg viewBox="0 0 100 140" class="block h-full w-full" role="img" aria-label="시군구 발자취 지도">
       <defs>
-        <pattern
-          v-for="cell in SIDO_CELLS"
-          :id="patternId(cell.sidoCode)"
-          :key="`pattern-${cell.sidoCode}`"
-          patternUnits="userSpaceOnUse"
-          :x="cell.x"
-          :y="cell.y"
-          :width="cell.w"
-          :height="cell.h"
-        >
-          <image
-            v-if="thumbnailFor(cell)"
-            :href="thumbnailFor(cell)"
-            :x="cell.x"
-            :y="cell.y"
-            :width="cell.w"
-            :height="cell.h"
-            preserveAspectRatio="xMidYMid slice"
-          />
-        </pattern>
+        <clipPath v-for="cell in visibleCells" :id="clipId(cell)" :key="`clip-${cell.id}`">
+          <path :d="cell.path" />
+        </clipPath>
       </defs>
 
-      <!-- 권역 셀 -->
       <g>
-        <path
-          v-for="cell in SIDO_CELLS"
-          :key="`cell-${cell.sidoCode}`"
-          :d="cell.d"
-          stroke-width="0.9"
-          stroke-linejoin="round"
-          :fill="thumbnailFor(cell) ? `url(#${patternId(cell.sidoCode)})` : undefined"
-          :class="cellClass(cell)"
-          :aria-label="cell.name"
+        <g
+          v-for="cell in visibleCells"
+          :key="cell.id"
+          class="cursor-pointer transition-opacity"
+          :opacity="cellOpacity(cell)"
+          role="button"
+          :aria-label="`${cell.label} ${cell.media.length ? `미디어 ${cell.media.length}개` : '기록 없음'}`"
           @click="onCell(cell)"
-        />
-        <path
-          v-for="cell in SIDO_CELLS"
-          :key="`shade-${cell.sidoCode}`"
-          :d="cell.d"
-          class="pointer-events-none"
-          :class="visited.has(cell.sidoCode) ? 'fill-[var(--brand)] opacity-15' : 'fill-transparent'"
-        />
-        <text
-          v-for="cell in SIDO_CELLS"
-          :key="`label-${cell.sidoCode}`"
-          :x="cell.labelX"
-          :y="cell.labelY + 1"
-          text-anchor="middle"
-          class="pointer-events-none fill-[var(--ink)] text-[3.2px] font-extrabold"
         >
-          {{ cell.name }}
-        </text>
-      </g>
-
-      <!-- 대표 추억 핀 -->
-      <g
-        v-for="p in pins"
-        :key="`pin-${p.item.id}`"
-        class="cursor-pointer"
-        role="button"
-        :aria-label="`${p.item.regionLabel} 대표 추억`"
-        @click="emit('select-pin', p.item)"
-      >
-        <circle :cx="p.center.x" :cy="p.center.y" r="3.6" class="fill-white" />
-        <circle :cx="p.center.x" :cy="p.center.y" r="2.8" class="fill-[var(--brand)]" />
-        <text
-          :x="p.center.x"
-          :y="p.center.y + 1"
-          text-anchor="middle"
-          class="pointer-events-none text-[2.6px]"
-        >
-          {{ MEDIA_BADGE[p.item.mediaType]?.emoji || '📍' }}
-        </text>
+          <path :d="cell.path" :class="cellClass(cell)" stroke-width="0.13" />
+          <image
+            v-if="cell.representative?.mediaType === 'PHOTO' && cell.representative?.mediaUrl"
+            :href="cell.representative.mediaUrl"
+            :clip-path="`url(#${clipId(cell)})`"
+            v-bind="{
+              x: mediaImageBox(cell).x,
+              y: mediaImageBox(cell).y,
+              width: mediaImageBox(cell).w,
+              height: mediaImageBox(cell).h,
+            }"
+            opacity="0.9"
+            preserveAspectRatio="xMidYMid slice"
+          />
+          <path
+            v-if="cell.media.length"
+            :d="cell.path"
+            class="pointer-events-none fill-[var(--brand)] opacity-10"
+          />
+          <circle
+            v-if="cell.media.length"
+            :cx="cell.center.x"
+            :cy="cell.center.y"
+            :r="badgeRadius(cell) * 2.8"
+            class="fill-white opacity-[0.01]"
+          />
+          <circle
+            v-if="cell.media.length"
+            :cx="cell.center.x"
+            :cy="cell.center.y"
+            :r="badgeRadius(cell)"
+            class="pointer-events-none fill-[var(--brand)] stroke-white"
+            stroke-width="0.28"
+          />
+          <text
+            v-if="cell.media.length"
+            :x="cell.center.x"
+            :y="cell.center.y + badgeRadius(cell) * 0.35"
+            text-anchor="middle"
+            class="pointer-events-none fill-white text-[1.7px] font-extrabold"
+          >
+            {{ cell.media.length }}
+          </text>
+          <text
+            v-if="cell.representative && cell.representative.mediaType !== 'PHOTO'"
+            :x="cell.center.x"
+            :y="cell.center.y + badgeRadius(cell) + 1.8"
+            text-anchor="middle"
+            class="pointer-events-none text-[2px]"
+          >
+            {{ MEDIA_BADGE[cell.representative.mediaType]?.emoji || '📍' }}
+          </text>
+          <text
+            v-if="shouldShowLabel(cell)"
+            :x="cell.center.x"
+            :y="cell.center.y + badgeRadius(cell) + 3.8"
+            text-anchor="middle"
+            class="pointer-events-none fill-[var(--ink)] text-[1.55px] font-bold"
+          >
+            {{ cell.name }}
+          </text>
+        </g>
       </g>
     </svg>
   </div>

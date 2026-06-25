@@ -25,7 +25,7 @@ const groupId = computed(() => route.params.id)
 
 const items = ref([])
 const group = ref(null)
-const regionLevel = ref('SIDO') // SIDO | GUGUN
+const regionLevel = ref('GUGUN')
 const selectedMediaType = ref(null)
 const status = ref('loading') // loading | ready | empty | error
 const focusedSido = ref(null)
@@ -57,11 +57,6 @@ const mediaTypeOptions = [
   { value: 'VIDEO', label: '영상' },
 ]
 
-const regionLevelOptions = [
-  { value: 'SIDO', label: '도/시' },
-  { value: 'GUGUN', label: '구군' },
-]
-
 const SIDO_DISPLAY_NAMES = {
   1: '서울시',
   2: '인천시',
@@ -84,7 +79,11 @@ const SIDO_DISPLAY_NAMES = {
 
 const regionStats = computed(() => {
   const map = new Map()
-  for (const item of items.value) {
+  const sourceItems =
+    focusedSido.value != null && regionLevel.value === 'GUGUN'
+      ? items.value.filter((item) => item.sidoCode === focusedSido.value)
+      : items.value
+  for (const item of sourceItems) {
     const key =
       regionLevel.value === 'GUGUN'
         ? `${item.sidoCode}-${item.gugunCode ?? 'unknown'}`
@@ -130,14 +129,10 @@ function resetFilters() {
   focusedSido.value = null
 }
 
-function selectRegionLevel(level) {
-  regionLevel.value = level
-  focusedSido.value = null
-}
-
 // 지도/카드 클릭 → 해당 시도로 포커스.
 function focusRegion(item) {
   focusedSido.value = item.sidoCode
+  regionLevel.value = 'GUGUN'
 }
 
 // ── 갤러리(E4) ──────────────────────────────────────────────
@@ -153,9 +148,14 @@ const galleryRepresentativeId = computed(() => {
   return rep?.id ?? null
 })
 
-async function openGallery({ sidoCode, gugunCode = null, regionLabel = '' }) {
-  focusedSido.value = sidoCode
+async function openGallery({ sidoCode, gugunCode = null, regionLabel = '', preloadedItems = null }) {
   gallery.value = { open: true, loading: true, label: regionLabel, sidoCode, gugunCode, items: [] }
+  if (Array.isArray(preloadedItems)) {
+    gallery.value.items = preloadedItems
+    gallery.value.loading = false
+    return
+  }
+  focusedSido.value = sidoCode
   try {
     const data = await getGroupMap(groupId.value, {
       sidoCode,
@@ -170,13 +170,8 @@ async function openGallery({ sidoCode, gugunCode = null, regionLabel = '' }) {
   }
 }
 
-function openGalleryBySido(sidoCode) {
-  const cell = SIDO_CELLS.find((c) => c.sidoCode === sidoCode)
-  openGallery({ sidoCode, regionLabel: cell?.name || '' })
-}
-
-function openGalleryFromPin(item) {
-  openGallery(galleryPayloadFor(item))
+function openGalleryByGugun(payload) {
+  openGallery(payload)
 }
 
 function openGalleryFromCard(item) {
@@ -207,26 +202,7 @@ function galleryPayloadFor(item) {
               다녀온 기록을 도/시 또는 구군 단위로 묶어 미디어를 보여줘요.
             </p>
           </div>
-          <div class="grid grid-cols-2 gap-2 sm:grid-cols-[auto_130px_auto]">
-            <div
-              class="flex h-9 overflow-hidden rounded-[var(--radius)] border border-[var(--border)] bg-[var(--bg-subtle)] p-0.5"
-              aria-label="지역 묶음 단위"
-            >
-              <button
-                v-for="option in regionLevelOptions"
-                :key="option.value"
-                type="button"
-                class="min-w-16 rounded-[var(--radius-sm)] px-3 text-[13px] font-semibold transition-colors"
-                :class="
-                  regionLevel === option.value
-                    ? 'bg-[var(--card)] text-[var(--brand-ink)] shadow-[var(--shadow-soft)]'
-                    : 'text-[var(--ink-3)] hover:text-[var(--ink)]'
-                "
-                @click="selectRegionLevel(option.value)"
-              >
-                {{ option.label }}
-              </button>
-            </div>
+          <div class="grid grid-cols-[130px_auto] gap-2">
             <Select v-model="selectedMediaType" :options="mediaTypeOptions" placeholder="미디어 전체" />
             <Button variant="outline" size="sm" class="h-9" @click="resetFilters">초기화</Button>
           </div>
@@ -237,8 +213,7 @@ function galleryPayloadFor(item) {
       <RegionMap
         :items="status === 'ready' ? items : []"
         :focused-sido="focusedSido"
-        @select-region="openGalleryBySido"
-        @select-pin="openGalleryFromPin"
+        @select-gugun="openGalleryByGugun"
       />
 
       <!-- 빈: 회색 전국 지도 위 EmptyState 오버레이 -->
@@ -305,7 +280,7 @@ function galleryPayloadFor(item) {
           :key="`${m.groupLevel}-${m.id}`"
           :item="m"
           :active="focusedSido === m.sidoCode"
-          @focus="openGalleryFromCard"
+          @focus="focusRegion"
           @change="openGalleryFromCard"
         />
       </div>
@@ -327,7 +302,7 @@ function galleryPayloadFor(item) {
           :key="`mobile-${m.groupLevel}-${m.id}`"
           type="button"
           class="w-[130px] flex-none snap-start text-left"
-          @click="openGalleryFromCard(m)"
+          @click="focusRegion(m)"
         >
           <img
             v-if="m.photo || m.mediaUrl"
