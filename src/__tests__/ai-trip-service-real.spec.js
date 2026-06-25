@@ -15,8 +15,13 @@ vi.mock('@/services/api', () => ({
   apiUpload: vi.fn(),
 }))
 
-const { createTripCandidates, recommendTrip, recommendRestaurants, createTripFromItinerary } =
-  await import('@/services/aiTrip')
+const {
+  createTripCandidates,
+  recommendTrip,
+  recommendRestaurants,
+  createTripFromItinerary,
+  insertMoveBlocks,
+} = await import('@/services/aiTrip')
 
 describe('AI 추천 서비스 (실제 API 분기)', () => {
   beforeEach(() => apiPost.mockClear())
@@ -78,5 +83,65 @@ describe('AI 추천 서비스 (실제 API 분기)', () => {
         }),
       }),
     )
+  })
+
+  describe('insertMoveBlocks — 같은 날 연속 장소 사이 이동 블록', () => {
+    const place = (id, title, date, lat, lng, time = null) => ({
+      id,
+      title,
+      type: '관광',
+      visitDate: date,
+      lat,
+      lng,
+      time,
+      order: 1,
+    })
+
+    it('같은 날 인접 장소쌍만 /api/ai/travel-legs 로 요청하고 이동 블록을 끼운다', async () => {
+      apiPost.mockResolvedValueOnce([
+        { available: true, mode: 'CAR', distanceMeters: 12300, durationSeconds: 1140 },
+      ])
+      const items = [
+        place('ai-1', '한림공원', '2026-07-01', 33.38, 126.24),
+        place('ai-2', '금산공원', '2026-07-01', 33.45, 126.49),
+        place('ai-3', '성산', '2026-07-02', 33.45, 126.93), // 다른 날 → leg 없음
+      ]
+
+      const result = await insertMoveBlocks(items, 'CAR')
+
+      // 1구간만 요청(같은 날 인접쌍 1개)
+      const [path, body] = apiPost.mock.calls[0]
+      expect(path).toBe('/api/ai/travel-legs')
+      expect(body.travelMode).toBe('CAR')
+      expect(body.legs).toHaveLength(1)
+
+      // 한림공원 다음에 이동 블록 삽입
+      expect(result).toHaveLength(4)
+      const move = result[1]
+      expect(move.type).toBe('이동')
+      expect(move.title).toBe('한림공원 → 금산공원')
+      expect(move.properties.transport).toBe('자동차 · 12.3km · 19분')
+    })
+
+    it('이동 계산이 실패해도 일정은 그대로 반환한다', async () => {
+      apiPost.mockRejectedValueOnce(new Error('boom'))
+      const items = [
+        place('ai-1', 'A', '2026-07-01', 33.1, 126.1),
+        place('ai-2', 'B', '2026-07-01', 33.2, 126.2),
+      ]
+      const result = await insertMoveBlocks(items, 'TRANSIT')
+      expect(result).toBe(items)
+    })
+
+    it('available=false 구간은 이동 블록을 만들지 않는다', async () => {
+      apiPost.mockResolvedValueOnce([{ available: false, mode: 'TRANSIT' }])
+      const items = [
+        place('ai-1', 'A', '2026-07-01', 33.1, 126.1),
+        place('ai-2', 'B', '2026-07-01', 33.2, 126.2),
+      ]
+      const result = await insertMoveBlocks(items, 'TRANSIT')
+      expect(result).toHaveLength(2)
+      expect(result.some((b) => b.type === '이동')).toBe(false)
+    })
   })
 })

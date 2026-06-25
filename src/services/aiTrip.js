@@ -225,3 +225,71 @@ export async function createTripFromItinerary({
   const data = { items, meta, aiRecommendation: { createdAt: null } }
   return createTrip({ title, startDate, endDate, groupId, data })
 }
+
+// ── 이동 블록 자동 삽입 ────────────────────────────────────────────────────────
+// 이동수단 라벨(백엔드 TravelMode → 사람이 읽는 한글).
+const TRANSPORT_LABEL = { CAR: '자동차', TRANSIT: '대중교통' }
+
+// 같은 날 인접 장소 사이의 이동 거리/시간을 백엔드(/api/ai/travel-legs)에서 받아
+// type:"이동" 블록으로 끼워넣는다. 기존 이동 블록 렌더(TripMoveStrip)를 그대로 활용.
+// 이동 계산이 실패해도 일정은 그대로 둔다(이동시간은 부가정보).
+export async function insertMoveBlocks(items, travelMode = 'CAR') {
+  if (USE_MOCK || !Array.isArray(items) || items.length < 2) return items
+
+  // 같은 날 + 양쪽 좌표가 있는 인접 장소쌍.
+  const pairs = []
+  for (let i = 0; i < items.length - 1; i++) {
+    const from = items[i]
+    const to = items[i + 1]
+    if (from.type === '이동' || to.type === '이동') continue
+    if (from.visitDate !== to.visitDate) continue
+    if (from.lat == null || from.lng == null || to.lat == null || to.lng == null) continue
+    pairs.push({ fromIdx: i, from, to })
+  }
+  if (pairs.length === 0) return items
+
+  let legs
+  try {
+    legs = await apiPost('/api/ai/travel-legs', {
+      travelMode,
+      legs: pairs.map((p) => ({
+        fromLat: p.from.lat,
+        fromLng: p.from.lng,
+        toLat: p.to.lat,
+        toLng: p.to.lng,
+      })),
+    })
+  } catch {
+    return items // 이동 계산 실패 → 일정만 저장
+  }
+  if (!Array.isArray(legs)) return items
+
+  // 뒤에서부터 splice 해 앞쪽 인덱스가 밀리지 않게 한다.
+  const result = items.slice()
+  for (let k = pairs.length - 1; k >= 0; k--) {
+    const leg = legs[k]
+    if (!leg || !leg.available) continue
+    result.splice(pairs[k].fromIdx + 1, 0, makeMoveBlock(pairs[k].from, pairs[k].to, leg, k))
+  }
+  return result
+}
+
+function makeMoveBlock(from, to, leg, seq) {
+  const km = (leg.distanceMeters / 1000).toFixed(1)
+  const min = Math.max(1, Math.round(leg.durationSeconds / 60))
+  const label = TRANSPORT_LABEL[leg.mode] ?? '이동'
+  return {
+    id: `ai-move-${seq}`,
+    content_id: null,
+    title: `${from.title} → ${to.title}`,
+    type: '이동',
+    visitDate: from.visitDate,
+    time: from.time ?? null,
+    durationMin: min,
+    order: from.order ?? null,
+    media: [],
+    properties: { transport: `${label} · ${km}km · ${min}분` },
+    distanceMeters: leg.distanceMeters,
+    durationSeconds: leg.durationSeconds,
+  }
+}
