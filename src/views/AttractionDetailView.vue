@@ -62,7 +62,7 @@ onUnmounted(() => {
 const categoryLabel = computed(() => {
   const id = attraction.value?.contentTypeId
   const found = contentTypes.value.find((t) => t.contentTypeId === id)
-  return found?.name ?? '관광지'
+  return found?.contentTypeName ?? '관광지'
 })
 
 const regionLabel = computed(() => {

@@ -53,14 +53,14 @@ export const GUGUNS = {
 
 // 콘텐츠 타입 = 테마 (TourAPI contentTypeId)
 export const CONTENT_TYPES = [
-  { contentTypeId: 12, name: '관광지' },
-  { contentTypeId: 14, name: '문화시설' },
-  { contentTypeId: 15, name: '축제·공연' },
-  { contentTypeId: 25, name: '여행코스' },
-  { contentTypeId: 28, name: '레포츠' },
-  { contentTypeId: 32, name: '숙박' },
-  { contentTypeId: 38, name: '쇼핑' },
-  { contentTypeId: 39, name: '음식점' },
+  { contentTypeId: 12, contentTypeName: '관광지' },
+  { contentTypeId: 14, contentTypeName: '문화시설' },
+  { contentTypeId: 15, contentTypeName: '축제·공연' },
+  { contentTypeId: 25, contentTypeName: '여행코스' },
+  { contentTypeId: 28, contentTypeName: '레포츠' },
+  { contentTypeId: 32, contentTypeName: '숙박' },
+  { contentTypeId: 38, contentTypeName: '쇼핑' },
+  { contentTypeId: 39, contentTypeName: '음식점' },
 ]
 
 // ── 관광지 마스터 ──────────────────────────────────────────────
