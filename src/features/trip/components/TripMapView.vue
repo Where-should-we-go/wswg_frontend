@@ -103,14 +103,18 @@ function readBrandColor() {
   return v || brandColor
 }
 
+// 마커 content 는 30x38 고정 박스. 좌표 정렬은 CSS transform 없이
+// Naver icon.anchor(=핀 바닥 꼭짓점) 하나로만 잡는다(이중 오프셋 방지).
+const MARKER_ANCHOR = { x: 15, y: 37 }
+
 function markerContent(block, order) {
   const color = railColorOf(block.type)
   const emoji = typeEmojiOf(block.type)
   return `
-    <div style="position:relative;transform:translate(-50%,-100%);cursor:pointer;">
+    <div style="position:relative;width:30px;height:38px;cursor:pointer;">
       <div style="display:flex;align-items:center;justify-content:center;width:30px;height:30px;border-radius:9999px;border:2px solid #fff;background:${color};font-size:15px;box-shadow:0 4px 10px rgba(0,0,0,.25);">${emoji}</div>
+      <div style="position:absolute;left:15px;top:28px;transform:translateX(-50%);width:0;height:0;border-left:5px solid transparent;border-right:5px solid transparent;border-top:9px solid #fff;"></div>
       <div style="position:absolute;top:-7px;right:-7px;min-width:17px;height:17px;padding:0 4px;display:flex;align-items:center;justify-content:center;border-radius:9999px;background:#fff;border:1px solid ${brandColor};color:${brandColor};font-size:11px;font-weight:700;line-height:1;">${order}</div>
-      <div style="position:absolute;left:50%;bottom:-6px;transform:translateX(-50%);width:0;height:0;border-left:5px solid transparent;border-right:5px solid transparent;border-top:7px solid #fff;"></div>
     </div>`
 }
 
@@ -144,7 +148,7 @@ function renderOverlays() {
       title: block.title,
       icon: {
         content: markerContent(block, index + 1),
-        anchor: new maps.Point(15, 38),
+        anchor: new maps.Point(MARKER_ANCHOR.x, MARKER_ANCHOR.y),
       },
       zIndex: 100 + index,
     })
