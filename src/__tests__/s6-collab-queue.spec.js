@@ -26,7 +26,13 @@ vi.mock('@/services/trips', () => ({
 }))
 
 // planSocket 을 제어 가능한 가짜로 교체.
-const sock = vi.hoisted(() => ({ onMessage: null, onStatus: null, sent: [], open: true, closed: false }))
+const sock = vi.hoisted(() => ({
+  onMessage: null,
+  onStatus: null,
+  sent: [],
+  open: true,
+  closed: false,
+}))
 vi.mock('@/features/trip/lib/planSocket', () => ({
   createPlanSocket: ({ onMessage, onStatus }) => {
     sock.onMessage = onMessage
@@ -59,7 +65,9 @@ function makeTrip() {
     members: [],
     data: {
       meta: {},
-      items: [{ id: 'b1', type: '관광', title: '', visitDate: '2026-01-01', order: 1, properties: {} }],
+      items: [
+        { id: 'b1', type: '관광', title: '', visitDate: '2026-01-01', order: 1, properties: {} },
+      ],
     },
   }
 }
@@ -127,7 +135,10 @@ describe('useTripEditor 실시간 op 큐', () => {
     const op = sock.sent.find((s) => s.type === 'block.update')
     const before = sock.sent.length
 
-    sock.onMessage({ type: 'error', payload: { code: 'PLAN_EDIT_BUSY', clientOpId: op.payload.clientOpId } })
+    sock.onMessage({
+      type: 'error',
+      payload: { code: 'PLAN_EDIT_BUSY', clientOpId: op.payload.clientOpId },
+    })
     vi.advanceTimersByTime(500) // 백오프 경과 → 재전송
 
     expect(sock.sent.length).toBe(before + 1)
@@ -166,5 +177,46 @@ describe('useTripEditor 실시간 op 큐', () => {
     const resent = sock.sent.filter((s) => s.type === 'block.update')
     expect(resent).toHaveLength(1)
     expect(resent[0].payload.patch.title).toBe('끊긴 동안 입력')
+  })
+
+  it('기간 변경은 전체 PUT 없이 컬럼 PATCH + 이동한 블록 op 로 보낸다', () => {
+    vi.useFakeTimers()
+    const trip = makeTrip()
+    trip.data.items.push({
+      id: 'b2',
+      type: '관광',
+      title: '',
+      visitDate: '2026-01-02',
+      order: 1,
+      properties: {},
+    })
+    const { api } = mountEditor(trip)
+
+    api.setDates('2026-01-01', '2026-01-01') // 2일차가 사라짐 → b2 가 1일차로 이동
+    vi.advanceTimersByTime(1000)
+
+    expect(updateTrip).not.toHaveBeenCalled()
+    expect(updateTripMeta).toHaveBeenCalledWith(10, {
+      title: '여행',
+      startDate: '2026-01-01',
+      endDate: '2026-01-01',
+    })
+    const moved = sock.sent.find((s) => s.type === 'block.update' && s.payload.id === 'b2')
+    expect(moved.payload.patch).toEqual({ visitDate: '2026-01-01', order: 2 })
+    const meta = sock.sent.find((s) => s.type === 'meta.update')
+    expect(meta.payload.patch).toMatchObject({ startDate: '2026-01-01', endDate: '2026-01-01' })
+  })
+
+  it('동행자 제외는 전체 PUT 없이 meta.update op 로만 보낸다', () => {
+    vi.useFakeTimers()
+    const { api } = mountEditor(makeTrip())
+
+    api.removeCompanion(7)
+    vi.advanceTimersByTime(1000)
+
+    expect(updateTrip).not.toHaveBeenCalled()
+    const meta = sock.sent.find((s) => s.type === 'meta.update')
+    expect(meta.payload.patch.removedMemberIds).toEqual(['7'])
+    expect(meta.payload.clientOpId).toMatch(/:/)
   })
 })

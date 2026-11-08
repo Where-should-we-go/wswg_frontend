@@ -653,9 +653,11 @@ export function useTripEditor(initialTrip) {
     }
   }
 
-  // 여행 기간(시작·종료일) 변경. 날짜는 trips 컬럼이라 PUT 으로 영속.
+  // 여행 기간(시작·종료일) 변경.
   //  - 일자가 늘면 빈 Day 가 자동으로 생긴다(days 계산이 dateRange 로 빈 날을 채움).
   //  - 일자가 줄어 사라지는 날의 항목은 남은 날짜에 무작위로 분산한다(사용자가 직접 정리하도록).
+  //  - 실시간 모드: 날짜는 컬럼 PATCH(/meta), 이동한 블록은 block.update op 로 보낸다.
+  //    전체 PUT 은 data(JSONB)를 Redis state 를 우회해 덮어써 flush 워커와 충돌하므로 쓰지 않는다.
   function setDates(startDate, endDate) {
     const start = startDate || null
     const end = endDate || null
@@ -666,6 +668,7 @@ export function useTripEditor(initialTrip) {
     trip.value.end_date = end
 
     const range = dateRange(start, end)
+    const moved = []
     if (range.length) {
       const valid = new Set(range)
       for (const it of items.value) {
@@ -677,11 +680,18 @@ export function useTripEditor(initialTrip) {
           .reduce((m, x) => Math.max(m, x.order ?? 0), 0)
         it.visitDate = target
         it.order = maxOrder + 1
+        moved.push(it)
       }
     }
-    // 협업자에게 기간 변경을 라이브로 알리고(meta.update), 컬럼+데이터를 PUT 으로 영속.
+    if (!realtimeEnabled) {
+      scheduleSave()
+      return
+    }
+    for (const it of moved) {
+      enqueueOp('block.update', { id: it.id, patch: { visitDate: it.visitDate, order: it.order } })
+    }
     scheduleMetaSend({ startDate: start, endDate: end })
-    scheduleSave()
+    schedulePersistMeta()
   }
 
   // 동행자를 이 여행에서만 뺀다(그룹 멤버십은 그대로). data.meta.removedMemberIds 에 누적.
@@ -692,8 +702,12 @@ export function useTripEditor(initialTrip) {
     next.add(id)
     meta.removedMemberIds = [...next]
     trip.value.members = (trip.value.members ?? []).filter((m) => String(m.id) !== id)
+    if (!realtimeEnabled) {
+      scheduleSave()
+      return
+    }
+    // data.meta 는 Redis state → flush 워커가 영속하므로 op 하나로 충분(PUT 불필요).
     scheduleMetaSend({ removedMemberIds: meta.removedMemberIds })
-    scheduleSave()
   }
 
   return {
